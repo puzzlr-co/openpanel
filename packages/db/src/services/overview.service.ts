@@ -556,7 +556,7 @@ export class OverviewService {
           clix.datetime(endDate, 'toDateTime'),
         ])
         .rawWhere(this.getRawWhereClause('events', filters))
-        .groupBy(['name'])
+        .groupBy([`properties['${propertyKey}']`])
         .having('name', '!=', '')
         .orderBy('count', 'DESC')
         .limit(limit)
