@@ -332,30 +332,32 @@ export class OverviewService {
 
   getRawWhereClause(type: 'events' | 'sessions', filters: IChartEventFilter[]) {
     const where = getEventFiltersWhereClause(
-      filters.map((item) => {
-        if (type === 'sessions') {
-          if (item.name === 'path') {
-            return { ...item, name: 'entry_path' };
+      filters
+        .filter((item) => {
+          // Filter out 'name' filter for sessions since sessions don't have event name column
+          if (type === 'sessions' && item.name === 'name') {
+            return false;
           }
-          if (item.name === 'origin') {
-            return { ...item, name: 'entry_origin' };
-          }
-          if (item.name.startsWith('properties.__query.utm_')) {
-            return {
-              ...item,
-              name: item.name.replace('properties.__query.utm_', 'utm_'),
-            };
+          return true;
+        })
+        .map((item) => {
+          if (type === 'sessions') {
+            if (item.name === 'path') {
+              return { ...item, name: 'entry_path' };
+            }
+            if (item.name === 'origin') {
+              return { ...item, name: 'entry_origin' };
+            }
+            if (item.name.startsWith('properties.__query.utm_')) {
+              return {
+                ...item,
+                name: item.name.replace('properties.__query.utm_', 'utm_'),
+              };
+            }
+            return item;
           }
           return item;
-        }
-        return item;
-      }),
-      // .filter((item) => {
-      //   if (this.isPageFilter(filters) && type === 'sessions') {
-      //     return item.name !== 'entry_path' && item.name !== 'entry_origin';
-      //   }
-      //   return true;
-      // }),
+        }),
     );
 
     return Object.values(where).join(' AND ');
