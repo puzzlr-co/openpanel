@@ -545,7 +545,7 @@ export class OverviewService {
       // Query event stats (similar to getTopPages)
       const eventStatsQuery = clix(this.client, timezone)
         .select([
-          `nullIf(properties['${propertyKey}'], '') as name`,
+          `nullIf(properties['${propertyKey}'], '') as property_name`,
           'uniq(session_id) as count',
           'round(avg(duration)/1000, 2) as avg_duration',
         ])
@@ -557,7 +557,7 @@ export class OverviewService {
         ])
         .rawWhere(this.getRawWhereClause('events', filters))
         .groupBy([`properties['${propertyKey}']`])
-        .having('name', '!=', '')
+        .having('property_name', '!=', '')
         .orderBy('count', 'DESC')
         .limit(limit)
         .offset(offset);
@@ -587,7 +587,7 @@ export class OverviewService {
           bounce_rate: number;
           avg_session_duration: number;
         }>([
-          'e.name',
+          'e.property_name as name',
           'e.count as sessions',
           'e.avg_duration as avg_session_duration',
           'round(countIf(b.is_bounce = 1) * 100.0 / count(b.id), 2) as bounce_rate',
@@ -595,9 +595,9 @@ export class OverviewService {
         .from('event_stats e', false)
         .leftJoin(
           'bounce_stats b',
-          `b.id IN (SELECT session_id FROM ${TABLE_NAMES.events} WHERE project_id = '${projectId}' AND properties['${propertyKey}'] = e.name)`,
+          `b.id IN (SELECT session_id FROM ${TABLE_NAMES.events} WHERE project_id = '${projectId}' AND properties['${propertyKey}'] = e.property_name)`,
         )
-        .groupBy(['e.name', 'e.count', 'e.avg_duration'])
+        .groupBy(['e.property_name', 'e.count', 'e.avg_duration'])
         .orderBy('sessions', 'DESC');
 
       return mainQuery.execute();
