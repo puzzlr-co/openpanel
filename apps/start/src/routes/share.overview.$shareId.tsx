@@ -78,19 +78,11 @@ function RouteComponent() {
   return (
     <div>
       {isHeaderVisible && (
-        <div className="mx-auto max-w-7xl justify-between row gap-4 p-4 pb-0">
+        <div className="mx-auto max-w-7xl row gap-4 p-4 pb-0">
           <div className="col gap-1">
             <span className="text-sm">{share.organization?.name}</span>
             <h1 className="text-xl font-medium">{share.project?.name}</h1>
           </div>
-          <a
-            href="https://openpanel.dev?utm_source=openpanel.dev&utm_medium=share"
-            className="col gap-1 items-end"
-            title="OpenPanel"
-          >
-            <span className="text-xs">POWERED BY</span>
-            <span className="text-xl font-medium">openpanel.dev</span>
-          </a>
         </div>
       )}
       <div className="mx-auto max-w-7xl">
