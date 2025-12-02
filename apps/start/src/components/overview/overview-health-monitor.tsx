@@ -21,11 +21,11 @@ export default function OverviewHealthMonitor({
 
   return (
     <>
-      <Widget className="col-span-6 md:col-span-3">
+      <Widget className="col-span-6 md:col-span-3 flex flex-col self-stretch">
         <WidgetHead>
-          <div className="title">Full Spectrum Health Monitor</div>
+          <div className="title">Cohort Breakdown</div>
         </WidgetHead>
-        <WidgetBody className="p-3">
+        <WidgetBody className="p-3 flex-1">
           <ReportChart
             options={{ hideID: true, columns: ['Day', 'Sessions'] }}
             report={{
@@ -58,7 +58,7 @@ export default function OverviewHealthMonitor({
               chartType,
               lineType: 'monotone',
               interval: interval,
-              name: 'Full Spectrum Health Monitor',
+              name: 'Cohort Breakdown',
               range: range,
               previous: false,
               metric: 'sum',

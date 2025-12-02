@@ -100,12 +100,12 @@ export default function OverviewDecayCurve({
   const isEmpty = retentionData.length === 0;
 
   return (
-    <Widget className="col-span-6 md:col-span-3">
+    <Widget className="col-span-6 md:col-span-3 flex flex-col self-stretch">
       <WidgetHead>
         <div className="title">Retention</div>
       </WidgetHead>
-      <WidgetBody className="p-3">
-        <div className="h-[200px] w-full">
+      <WidgetBody className="p-3 flex-1 flex flex-col">
+        <div className="min-h-[200px] flex-1 w-full">
           {query.isLoading ? (
             <div className="h-full w-full animate-pulse rounded bg-def-200" />
           ) : isEmpty ? (
