@@ -87,7 +87,13 @@ export function createLogger({ name }: { name: string }): ILogger {
     format = winston.format.combine(
       errorFormatter(),
       redactSensitiveInfo(),
-      winston.format.colorize(),
+      winston.format.colorize({
+        all: true,
+        colors: {
+          fatal: 'red',
+          trace: 'grey',
+        },
+      }),
       winston.format.printf((info) => {
         const { level, message, service, ...meta } = info;
         const metaStr =
