@@ -6,6 +6,7 @@ export type IServiceClient = Client;
 export type IServiceClientWithProject = Prisma.ClientGetPayload<{
   include: {
     project: true;
+    organization: true;
   };
 }>;
 
@@ -30,6 +31,7 @@ export async function getClientById(
     where: { id },
     include: {
       project: true,
+      organization: true,
     },
   });
 }

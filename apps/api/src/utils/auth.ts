@@ -133,11 +133,25 @@ export async function validateSdkRequest(
       }
     }
 
+    // Try client secret first
     if (client.secret && clientSecret) {
       const isVerified = await getCache(
         `client:auth:${clientId}:${Buffer.from(clientSecret).toString('base64')}`,
         60 * 5,
         async () => await verifyPassword(clientSecret, client.secret!),
+        true,
+      );
+      if (isVerified) {
+        return client;
+      }
+    }
+
+    // Fallback: try organization secret (client has direct org relation)
+    if (clientSecret && client.organization?.secret) {
+      const isVerified = await getCache(
+        `org:auth:${client.organizationId}:${Buffer.from(clientSecret).toString('base64')}`,
+        60 * 5,
+        async () => await verifyPassword(clientSecret, client.organization!.secret!),
         true,
       );
       if (isVerified) {
