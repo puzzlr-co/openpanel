@@ -61,6 +61,7 @@ COPY packages ./packages
 COPY tooling ./tooling
 
 # Generate Prisma client and build the app
+ENV NODE_OPTIONS="--max-old-space-size=4096"
 RUN pnpm --filter start run build
 
 # PROD - Install only production dependencies

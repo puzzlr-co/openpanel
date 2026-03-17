@@ -175,7 +175,7 @@ op-api:
     start_period: 600s  # Allow 10 min for migrations before health checks begin
 ```
 
-##### 1.10 Build and push Docker images
+##### 1.10 Build and push Docker images [x]
 
 ```bash
 ./sh/docker-build all 2.0.0
