@@ -90,7 +90,7 @@ services:
         max-file: "3"
 
   op-api:
-    image: lindesvard/openpanel-api:2
+    image: keiwanmosaddegh/openpanel-api:2
     restart: always
     command: >
       sh -c "
@@ -104,6 +104,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 600s
     depends_on:
       op-db:
         condition: service_healthy
@@ -120,7 +121,7 @@ services:
         max-file: "3"
 
   op-dashboard:
-    image: lindesvard/openpanel-dashboard:2
+    image: keiwanmosaddegh/openpanel-dashboard:2
     restart: always
     depends_on:
       op-api:
@@ -140,7 +141,7 @@ services:
         max-file: "3"
 
   op-worker:
-    image: lindesvard/openpanel-worker:2
+    image: keiwanmosaddegh/openpanel-worker:2
     restart: always
     depends_on:
       op-api:

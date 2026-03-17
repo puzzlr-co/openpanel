@@ -1,6 +1,7 @@
+import { createHash } from 'node:crypto';
 import { verifyPassword } from '@openpanel/common/server';
 import type { IServiceClientWithProject } from '@openpanel/db';
-import { ClientType, getClientByIdCached } from '@openpanel/db';
+import { ClientType, db, getClientByIdCached } from '@openpanel/db';
 import { getCache } from '@openpanel/redis';
 import type {
   DeprecatedPostEventPayload,
@@ -157,11 +158,33 @@ export async function validateSdkRequest(
   }
 
   if (client.secret && clientSecret) {
+    const secretHash = createHash('sha256').update(clientSecret).digest('hex');
     const isVerified = await getCache(
-      `client:auth:${clientId}:${Buffer.from(clientSecret).toString('base64')}`,
+      `client:auth:${clientId}:${secretHash}`,
       60 * 5,
-      async () => await verifyPassword(clientSecret, client.secret!),
-      true
+      () => verifyPassword(clientSecret, client.secret!),
+      true,
+    );
+    if (isVerified) {
+      return client;
+    }
+  }
+
+  // Org secret fallback: allow authenticating with organization-level secret
+  if (client.organizationId && clientSecret) {
+    const secretHash = createHash('sha256').update(clientSecret).digest('hex');
+    const isVerified = await getCache(
+      `org:auth:${client.organizationId}:${secretHash}`,
+      60 * 5,
+      async () => {
+        const org = await db.organization.findUnique({
+          where: { id: client.organizationId },
+          select: { secret: true },
+        });
+        if (!org?.secret) return false;
+        return verifyPassword(clientSecret, org.secret);
+      },
+      true,
     );
     if (isVerified) {
       return client;

@@ -1,16 +1,19 @@
 import { InputWithLabel, WithLabel } from '@/components/forms/input-with-label';
 import { FullPageEmptyState } from '@/components/full-page-empty-state';
 import FullPageLoadingState from '@/components/full-page-loading-state';
+import { pushModal } from '@/modals';
 import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { Combobox } from '@/components/ui/combobox';
 import DeleteOrganization from '@/components/settings/delete-organization';
+import { Input } from '@/components/ui/input';
 import { Widget, WidgetBody, WidgetHead } from '@/components/widget';
 import { handleError, useTRPC } from '@/integrations/trpc/react';
 import { PAGE_TITLES, createOrganizationTitle } from '@/utils/title';
 import { zEditOrganization } from '@openpanel/validation';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { createFileRoute } from '@tanstack/react-router';
+import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { toast } from 'sonner';
 import type { z } from 'zod';
@@ -131,9 +134,104 @@ function Component() {
         </Widget>
       </form>
 
+      <OrganizationSecret organizationId={organizationId} />
+
       <div className="mt-8">
         <DeleteOrganization organization={organization} />
       </div>
     </div>
+  );
+}
+
+function OrganizationSecret({
+  organizationId,
+}: {
+  organizationId: string;
+}) {
+  const trpc = useTRPC();
+  const { data, refetch } = useQuery(
+    trpc.organization.hasSecret.queryOptions({ organizationId }),
+  );
+  const [confirmText, setConfirmText] = useState('');
+
+  const generateMutation = useMutation(
+    trpc.organization.generateSecret.mutationOptions({
+      onSuccess(res) {
+        pushModal('ShowOrganizationSecret', { secret: res.secret });
+        refetch();
+      },
+      onError: handleError,
+    }),
+  );
+
+  const regenerateMutation = useMutation(
+    trpc.organization.regenerateSecret.mutationOptions({
+      onSuccess(res) {
+        pushModal('ShowOrganizationSecret', { secret: res.secret });
+        refetch();
+        setConfirmText('');
+      },
+      onError: handleError,
+    }),
+  );
+
+  const hasSecret = data?.hasSecret ?? false;
+
+  return (
+    <Widget className="mt-8">
+      <WidgetHead className="flex items-center justify-between">
+        <span className="title">Organization Secret</span>
+      </WidgetHead>
+      <WidgetBody className="gap-4 col">
+        <p className="text-sm text-muted-foreground">
+          An organization secret allows server-side SDKs to authenticate using
+          any project ID in this organization. Use it as the{' '}
+          <code className="rounded bg-muted px-1 py-0.5 text-xs">
+            openpanel-client-secret
+          </code>{' '}
+          header.
+        </p>
+        {!hasSecret ? (
+          <Button
+            size="sm"
+            className="self-start"
+            onClick={() => generateMutation.mutate({ organizationId })}
+            loading={generateMutation.isPending}
+          >
+            Generate Secret
+          </Button>
+        ) : (
+          <div className="flex flex-col gap-3">
+            <p className="text-sm font-medium">
+              A secret has been generated for this organization.
+            </p>
+            <p className="text-sm text-muted-foreground">
+              Type <strong>REGENERATE</strong> to confirm. This will
+              immediately invalidate the current secret and break any
+              integrations using it.
+            </p>
+            <div className="flex gap-2">
+              <Input
+                placeholder='Type "REGENERATE" to confirm'
+                value={confirmText}
+                onChange={(e) => setConfirmText(e.target.value)}
+                className="max-w-xs"
+              />
+              <Button
+                size="sm"
+                variant="destructive"
+                disabled={confirmText !== 'REGENERATE'}
+                onClick={() =>
+                  regenerateMutation.mutate({ organizationId })
+                }
+                loading={regenerateMutation.isPending}
+              >
+                Regenerate Secret
+              </Button>
+            </div>
+          </div>
+        )}
+      </WidgetBody>
+    </Widget>
   );
 }

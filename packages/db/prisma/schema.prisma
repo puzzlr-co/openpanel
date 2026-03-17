@@ -84,6 +84,7 @@ model Organization {
   conversations   Conversation[]
   timezone        String?
   onboarding      String?          @default("completed")
+  secret          String?
 
   // Subscription
   subscriptionId                          String?

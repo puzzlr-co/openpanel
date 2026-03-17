@@ -15,6 +15,7 @@ import { generateSecureId } from '@openpanel/common/server';
 import { sendEmail } from '@openpanel/email';
 import { addDays, addHours } from 'date-fns';
 import { getOrganizationAccess } from '../access';
+import { orgSecretProcedures } from './fork/org-secret';
 import { TRPCForbiddenError, TRPCBadRequestError } from '../errors';
 import {
   createTRPCRouter,
@@ -403,4 +404,7 @@ export const organizationRouter = createTRPCRouter({
       }
       return getInviteById(input.inviteId);
     }),
+
+  // --- Fork: org-secret management ---
+  ...orgSecretProcedures,
 });

@@ -39,6 +39,7 @@ import SetupTwoFactor from './setup-two-factor';
 import ShareDashboardModal from './share-dashboard-modal';
 import ShareOverviewModal from './share-overview-modal';
 import ShareReportModal from './share-report-modal';
+import ShowOrganizationSecret from './show-organization-secret';
 import ViewChartUsers from './view-chart-users';
 import OverviewTopGenericModal from '@/components/overview/overview-top-generic-modal';
 import OverviewTopPagesModal from '@/components/overview/overview-top-pages-modal';
@@ -71,6 +72,7 @@ const modals = {
   ShareOverviewModal,
   ShareDashboardModal,
   ShareReportModal,
+  ShowOrganizationSecret,
   AddReference,
   ViewChartUsers,
   Instructions,

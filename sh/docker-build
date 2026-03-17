@@ -77,7 +77,7 @@ fi
 # Function to build a multi-architecture image
 build_image() {
     local app=$1
-    local image_name="lindesvard/openpanel-$app"
+    local image_name="keiwanmosaddegh/openpanel-$app"
     
     # Use apps/start/Dockerfile for dashboard app
     local dockerfile="apps/$app/Dockerfile"
