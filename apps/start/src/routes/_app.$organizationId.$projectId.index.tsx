@@ -1,3 +1,4 @@
+import { Fragment } from 'react';
 import { createFileRoute } from '@tanstack/react-router';
 import { LazyComponent } from '@/components/lazy-component';
 import { useRangePageContext } from '@/hooks/use-page-context-helpers';
@@ -7,18 +8,10 @@ import {
 } from '@/components/overview/filters/overview-filters-buttons';
 import { OverviewAICommand } from '@/components/overview/overview-ai-command';
 import { LiveCounter } from '@/components/overview/live-counter';
-import OverviewInsights from '@/components/overview/overview-insights';
 import { OverviewInterval } from '@/components/overview/overview-interval';
-import OverviewMetrics from '@/components/overview/overview-metrics';
 import { OverviewRange } from '@/components/overview/overview-range';
 import { OverviewShare } from '@/components/overview/overview-share';
-import OverviewTopDevices from '@/components/overview/overview-top-devices';
-import OverviewTopEvents from '@/components/overview/overview-top-events';
-import OverviewTopGeo from '@/components/overview/overview-top-geo';
-import OverviewTopPages from '@/components/overview/overview-top-pages';
-import OverviewTopSources from '@/components/overview/overview-top-sources';
-import OverviewUserJourney from '@/components/overview/overview-user-journey';
-import OverviewWeeklyTrends from '@/components/overview/overview-weekly-trends';
+import { getWidgets } from '@/config/overview-widgets.fork';
 import { createProjectTitle, PAGE_TITLES } from '@/utils/title';
 
 export const Route = createFileRoute('/_app/$organizationId/$projectId/')({
@@ -57,19 +50,15 @@ function ProjectDashboard() {
         </div>
       </div>
       <div className="grid grid-cols-6 gap-4 p-4 pt-0">
-        <OverviewMetrics projectId={projectId} />
-        <OverviewInsights projectId={projectId} />
-        <OverviewTopSources projectId={projectId} />
-        <OverviewTopPages projectId={projectId} />
-        <OverviewTopDevices projectId={projectId} />
-        <OverviewTopEvents projectId={projectId} />
-        <OverviewTopGeo projectId={projectId} />
-        <LazyComponent className="col-span-6">
-          <OverviewWeeklyTrends projectId={projectId} />
-        </LazyComponent>
-        <LazyComponent className="col-span-6">
-          <OverviewUserJourney projectId={projectId} />
-        </LazyComponent>
+        {getWidgets('dashboard').map(widget => {
+          const Widget = widget.component;
+          const el = <Widget projectId={projectId} {...widget.props} />;
+          return widget.lazyViewport ? (
+            <LazyComponent key={widget.key} className="col-span-6">{el}</LazyComponent>
+          ) : (
+            <Fragment key={widget.key}>{el}</Fragment>
+          );
+        })}
       </div>
     </div>
   );

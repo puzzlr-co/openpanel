@@ -28,6 +28,7 @@ import { getChartColor } from '@/utils/theme';
 interface OverviewMetricsProps {
   projectId: string;
   shareId?: string;
+  excludeMetricKeys?: string[];
 }
 
 // Softer than --chart-8's electric emerald, still clearly "green = money".
@@ -84,13 +85,17 @@ const TITLES = [
 export default function OverviewMetrics({
   projectId,
   shareId,
+  excludeMetricKeys,
 }: OverviewMetricsProps) {
   const { range, interval, metric, setMetric, startDate, endDate } =
     useOverviewOptions();
   const [filters] = useEventQueryFilters();
   const trpc = useTRPC();
 
-  const activeMetric = TITLES[metric]!;
+  const activeTitles = excludeMetricKeys
+    ? TITLES.filter(t => !excludeMetricKeys.includes(t.key))
+    : TITLES;
+  const activeMetric = activeTitles[metric]!;
   const overviewQuery = useQuery(
     trpc.overview.stats.queryOptions({
       projectId,
@@ -113,7 +118,7 @@ export default function OverviewMetrics({
   return (
     <div className="relative -top-0.5 col-span-6 mt-0 mb-0 md:m-0">
       <div className="card mb-2 grid grid-cols-2 overflow-hidden rounded-md md:grid-cols-4">
-        {TITLES.map((title, index) => (
+        {activeTitles.map((title, index) => (
           <OverviewMetricCard
             active={metric === index}
             data={data.map((item) => ({

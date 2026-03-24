@@ -32,6 +32,18 @@ No architectural changes — same 6-service Docker Compose stack. Key version bu
 | Dashboard framework | Next.js | TanStack Start |
 | Docker images | `keiwanmosaddegh/*:latest` | `keiwanmosaddegh/*:2.0.0` |
 
+### Progress
+
+| Phase | Status |
+|-------|--------|
+| 1. Local Preparation | Done (2026-03-17) |
+| 2. Local Testing | Done (2026-03-18) |
+| 2.4 Overview Customization Scaffold | Done (2026-03-24) |
+| 2.5 Custom Widgets | **Next** |
+| 3. VPS Backup | Pending |
+| 4. VPS Upgrade | Pending |
+| 5. Verification | Pending |
+
 ### Implementation Phases
 
 ---
@@ -191,13 +203,13 @@ op-api:
 
 Before deploying to the VPS, test the full migration path locally using production data.
 
-##### 2.1 Get production Postgres dump
+##### 2.1 Get production Postgres dump [x]
 
 ```bash
 ssh root@91.98.228.238 'docker exec self-hosting-op-db-1 pg_dump -U postgres --clean --if-exists postgres' > /tmp/prod-pg-dump.sql
 ```
 
-##### 2.2 Load into local environment and test
+##### 2.2 Load into local environment and test [x]
 
 ```bash
 # Start local infra
@@ -223,12 +235,26 @@ CI=true pnpm -r run migrate:deploy
 
 **Note:** This tests that all migration SQL is valid but doesn't test migration #8 with real data volume. That test happens on the VPS with the full backup safety net (Phase 3).
 
-##### 2.3 Smoke test
+##### 2.3 Smoke test [x]
 
 ```bash
 pnpm dev  # Start dev servers
 # Test: dashboard loads, data visible, org secret auth works
 ```
+
+**Phase 2 completed 2026-03-18.** All migration SQL valid. API, Worker, Dashboard all start and connect to all three databases.
+
+---
+
+#### Phase 2.4: Fork-Safe Overview Customization Scaffold [x]
+
+**Completed 2026-03-24.** Extracted hardcoded overview widgets into config-driven rendering. Fork customizations in `apps/start/src/config/overview-widgets.fork.ts`, custom widget components in `apps/start/src/components/custom/`. See `apps/start/src/config/README.md` for usage guide.
+
+---
+
+#### Phase 2.5: Custom Widgets
+
+**Goal:** Build fork-specific widgets for the overview page using the scaffold from Phase 2.4. Must be completed and Docker images rebuilt before Phase 3.
 
 ---
 
@@ -484,9 +510,9 @@ ssh root@91.98.228.238 'rm /root/backup-pre-v2.sql /root/backup-*.csv /root/back
 
 ### Quality Gates
 
-- [ ] Full migration tested locally against production data copy (Phase 2)
-- [ ] All Prisma migrations applied without errors
-- [ ] All ClickHouse code migrations completed successfully
+- [x] Full migration tested locally against production data copy (Phase 2)
+- [x] All Prisma migrations applied without errors
+- [x] All ClickHouse code migrations completed successfully
 - [ ] Event count matches pre-upgrade count
 - [ ] Rollback procedure documented and tested
 
