@@ -127,7 +127,7 @@ export async function validateSdkRequest(
     );
   }
 
-  if (client.ignoreCorsAndSecret) {
+  if (client.ignoreCorsAndSecret || process.env.INGESTION_SKIP_ORIGIN_CHECK === 'true') {
     return client;
   }
 
