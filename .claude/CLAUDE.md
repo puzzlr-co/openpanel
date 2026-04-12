@@ -1,3 +1,5 @@
+Approach implementations in a way so that I can harmlessly do upstream pulls in the future, lowering the risk of breaking code changes, and the least likelihood of causing conflicts with future upstream changes, while still being simple and efficient.
+
 # CLAUDE.md
 
 NEVER CALL FORMAT! WE'LL FORMAT IN THE FUTURE WHEN WE HAVE MERGED ALL BIG PRS!
