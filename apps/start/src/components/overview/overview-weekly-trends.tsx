@@ -22,6 +22,7 @@ import { useOverviewOptions } from './useOverviewOptions';
 interface OverviewWeeklyTrendsProps {
   projectId: string;
   shareId?: string;
+  excludeMetricKeys?: string[];
 }
 
 type MetricKey =
@@ -74,9 +75,13 @@ function getColorClass(ratio: number) {
 export default function OverviewWeeklyTrends({
   projectId,
   shareId,
+  excludeMetricKeys,
 }: OverviewWeeklyTrendsProps) {
   const { range, startDate, endDate } = useOverviewOptions();
   const [filters] = useEventQueryFilters();
+  const activeMetrics = excludeMetricKeys
+    ? METRICS.filter((m) => !excludeMetricKeys.includes(m.key))
+    : METRICS;
   const [metric, setMetric] = useState<MetricKey>('unique_visitors');
   const trpc = useTRPC();
   const number = useNumber();
@@ -142,7 +147,7 @@ export default function OverviewWeeklyTrends({
   return (
     <Widget className="col-span-6">
       <WidgetHeadSearchable
-        tabs={METRICS.map((m) => ({ key: m.key, label: m.label }))}
+        tabs={activeMetrics.map((m) => ({ key: m.key, label: m.label }))}
         activeTab={metric}
         onTabChange={setMetric}
       />
