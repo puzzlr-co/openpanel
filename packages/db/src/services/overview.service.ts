@@ -507,6 +507,94 @@ export class OverviewService {
     };
   }
 
+  // Multi-game sessions: % of sessions (with at least one level_started in the
+  // window) that played 2+ distinct games. Puzzlr-specific — relies on the
+  // `level_started` event and `game_id` property emitted by Puzzlr SDKs.
+  // Headline is a period-wide ratio; series is a per-bucket ratio mirroring
+  // the headline at the user's selected interval.
+  async getMultiGameSessions({
+    projectId,
+    filters,
+    startDate,
+    endDate,
+    interval,
+    timezone,
+  }: IGetMetricsInput): Promise<{
+    metrics: { multi_game_sessions: number };
+    series: { date: string; multi_game_sessions: number }[];
+  }> {
+    const fillConfig = this.getFillConfig(interval, startDate, endDate);
+
+    const sessionGamesCte = clix(this.client, timezone)
+      .select<{ session_id: string; games: number }>([
+        'session_id',
+        "uniqExact(properties['game_id']) AS games",
+      ])
+      .from(TABLE_NAMES.events)
+      .where('project_id', '=', projectId)
+      .where('name', '=', 'level_started')
+      .where('session_id', '!=', '')
+      .where('created_at', 'BETWEEN', [
+        clix.datetime(startDate, 'toDateTime'),
+        clix.datetime(endDate, 'toDateTime'),
+      ])
+      .rawWhere(this.getRawWhereClause('events', filters))
+      .groupBy(['session_id']);
+
+    const headlineQuery = clix(this.client, timezone)
+      .with('session_games', sessionGamesCte)
+      .select<{ multi_game_sessions: number }>([
+        'round(countIf(games >= 2) * 100.0 / nullIf(count(), 0), 1) AS multi_game_sessions',
+      ])
+      .from('session_games');
+
+    const bucketedCte = clix(this.client, timezone)
+      .select<{ bucket: string; session_id: string; games: number }>([
+        `${clix.toStartOf('created_at', interval as any, timezone)} AS bucket`,
+        'session_id',
+        "uniqExact(properties['game_id']) AS games",
+      ])
+      .from(TABLE_NAMES.events)
+      .where('project_id', '=', projectId)
+      .where('name', '=', 'level_started')
+      .where('session_id', '!=', '')
+      .where('created_at', 'BETWEEN', [
+        clix.datetime(startDate, 'toDateTime'),
+        clix.datetime(endDate, 'toDateTime'),
+      ])
+      .rawWhere(this.getRawWhereClause('events', filters))
+      .groupBy(['bucket', 'session_id']);
+
+    const seriesQuery = clix(this.client, timezone)
+      .with('bucketed', bucketedCte)
+      .select<{ date: string; multi_game_sessions: number }>([
+        'bucket AS date',
+        'round(countIf(games >= 2) * 100.0 / nullIf(count(), 0), 1) AS multi_game_sessions',
+      ])
+      .from('bucketed')
+      .groupBy(['bucket'])
+      .orderBy('date', 'ASC')
+      .fill(fillConfig.from, fillConfig.to, fillConfig.step)
+      .transform({
+        date: (item) => convertClickhouseDateToJs(item.date).toISOString(),
+      });
+
+    const [seriesRes, headlineRes] = await Promise.all([
+      seriesQuery.execute(),
+      headlineQuery.execute(),
+    ]);
+
+    return {
+      metrics: {
+        multi_game_sessions: headlineRes[0]?.multi_game_sessions ?? 0,
+      },
+      series: seriesRes.map((row) => ({
+        date: row.date,
+        multi_game_sessions: row.multi_game_sessions ?? 0,
+      })),
+    };
+  }
+
   private async getMetricsWithPageFilter({
     projectId,
     filters,

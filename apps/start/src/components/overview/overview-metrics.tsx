@@ -51,6 +51,13 @@ const TITLES = [
     inverted: false,
   },
   {
+    title: 'Multi-game sessions',
+    key: 'multi_game_sessions',
+    unit: '%',
+    inverted: false,
+    info: 'Of sessions that played at least one game in the window, the percentage that played 2 or more distinct games. Based on level_started events.',
+  },
+  {
     title: 'Sessions',
     key: 'total_sessions',
     unit: '',
@@ -133,6 +140,7 @@ export default function OverviewMetrics({
               previous: item[`prev_${title.key}`],
             }))}
             id={title.key}
+            info={'info' in title ? title.info : undefined}
             interval={interval}
             inverted={title.inverted}
             isLoading={overviewQuery.isLoading}

@@ -1,4 +1,6 @@
+import { InfoIcon } from 'lucide-react';
 import { useFormatDateInterval } from '@/hooks/use-format-date-interval';
+import { Tooltiper } from '../ui/tooltip';
 import { fancyMinutes, useNumber } from '@/hooks/use-numer-formatter';
 import { cn } from '@/utils/cn';
 import { timeWindows } from '@openpanel/constants';
@@ -34,6 +36,7 @@ interface MetricCardProps {
   };
   unit?: MetricUnit;
   label: string;
+  info?: ReactNode;
   onClick?: () => void;
   active?: boolean;
   inverted?: boolean;
@@ -50,6 +53,7 @@ export function OverviewMetricCard({
   metric,
   unit,
   label,
+  info,
   onClick,
   active,
   inverted = false,
@@ -78,8 +82,26 @@ export function OverviewMetricCard({
     <MetricCardShell active={active} onClick={onClick}>
       <div className="px-3 pt-2.5">
         <div className="flex items-start justify-between gap-2">
-          <span className="truncate text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-            {label}
+          <span className="flex min-w-0 items-center gap-1">
+            <span className="truncate text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+              {label}
+            </span>
+            {info && (
+              <Tooltiper
+                asChild
+                content={info}
+                side="top"
+                tooltipClassName="max-w-xs leading-normal"
+              >
+                <span
+                  className="inline-flex shrink-0 cursor-help text-muted-foreground/70 hover:text-muted-foreground"
+                  onClick={(e) => e.stopPropagation()}
+                  onMouseDown={(e) => e.stopPropagation()}
+                >
+                  <InfoIcon size={12} />
+                </span>
+              </Tooltiper>
+            )}
           </span>
           {isLoading ? null : (
             <PreviousDiffIndicatorPure
