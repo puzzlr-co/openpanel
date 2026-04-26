@@ -3,23 +3,17 @@ import { ShareEnterPassword } from '@/components/auth/share-enter-password';
 import { FullPageEmptyState } from '@/components/full-page-empty-state';
 import FullPageLoadingState from '@/components/full-page-loading-state';
 import { LazyComponent } from '@/components/lazy-component';
-import { LoginNavbar } from '@/components/login-navbar';
 import { OverviewFiltersButtons } from '@/components/overview/filters/overview-filters-buttons';
 import { LiveCounter } from '@/components/overview/live-counter';
+import { OverviewInterval } from '@/components/overview/overview-interval';
 import { OverviewRange } from '@/components/overview/overview-range';
 import { getWidgets } from '@/config/overview-widgets.fork';
 import { useTRPC } from '@/integrations/trpc/react';
 import { useSuspenseQuery } from '@tanstack/react-query';
-import { createFileRoute, notFound, useSearch } from '@tanstack/react-router';
-import { z } from 'zod';
-
-const shareSearchSchema = z.object({
-  header: z.optional(z.number().or(z.string().or(z.boolean()))),
-});
+import { createFileRoute, notFound } from '@tanstack/react-router';
 
 export const Route = createFileRoute('/share/overview/$shareId')({
   component: RouteComponent,
-  validateSearch: shareSearchSchema,
   loader: async ({ context, params }) => {
     const share = await context.queryClient.ensureQueryData(
       context.trpc.share.overview.queryOptions({
@@ -34,7 +28,7 @@ export const Route = createFileRoute('/share/overview/$shareId')({
       return {
         meta: [
           {
-            title: 'Share not found - OpenPanel.dev',
+            title: 'Share not found',
           },
         ],
       };
@@ -43,7 +37,7 @@ export const Route = createFileRoute('/share/overview/$shareId')({
     return {
       meta: [
         {
-          title: `${loaderData.share.project?.name} - ${loaderData.share.organization?.name} - OpenPanel.dev`,
+          title: `${loaderData.share.project?.name} - ${loaderData.share.organization?.name}`,
         },
       ],
     };
@@ -60,7 +54,6 @@ export const Route = createFileRoute('/share/overview/$shareId')({
 
 function RouteComponent() {
   const { shareId } = Route.useParams();
-  const { header } = useSearch({ from: '/share/overview/$shareId' });
   const trpc = useTRPC();
   const shareQuery = useSuspenseQuery(
     trpc.share.overview.queryOptions({
@@ -90,21 +83,14 @@ function RouteComponent() {
     return <ShareEnterPassword shareId={share.id} />;
   }
 
-  const isHeaderVisible =
-    header !== '0' && header !== 0 && header !== 'false' && header !== false;
-
   return (
     <div>
-      {isHeaderVisible && (
-        <div className="mx-auto max-w-7xl">
-          <LoginNavbar className="relative p-4" />
-        </div>
-      )}
       <div className="sticky-header [animation-range:50px_100px]!">
         <div className="p-4 col gap-2 mx-auto max-w-7xl">
           <div className="row justify-between">
             <div className="flex gap-2">
               <OverviewRange />
+              <OverviewInterval />
             </div>
             <div className="flex gap-2">
               <LiveCounter projectId={projectId} shareId={shareId} />
