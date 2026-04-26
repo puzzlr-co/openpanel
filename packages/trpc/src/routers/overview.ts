@@ -268,14 +268,25 @@ export const overviewRouter = createTRPCRouter({
     .use(cacher)
     .query(async ({ input }) => {
       const { timezone } = await getSettingsForProject(input.projectId);
-      const { current, previous } = await getCurrentAndPrevious(
-        { ...input, timezone },
-        true,
-        timezone
-      )(overviewService.getMetrics.bind(overviewService));
+      const [
+        { current, previous },
+        { current: avgDauCurrent, previous: avgDauPrevious },
+      ] = await Promise.all([
+        getCurrentAndPrevious(
+          { ...input, timezone },
+          true,
+          timezone,
+        )(overviewService.getMetrics.bind(overviewService)),
+        getCurrentAndPrevious(
+          { ...input, timezone },
+          true,
+          timezone,
+        )(overviewService.getAvgDau.bind(overviewService)),
+      ]);
       return {
         metrics: {
           ...current.metrics,
+          avg_dau: avgDauCurrent.metrics.avg_dau,
           prev_bounce_rate: previous?.metrics.bounce_rate || null,
           prev_unique_visitors: previous?.metrics.unique_visitors || null,
           prev_total_screen_views: previous?.metrics.total_screen_views || null,
@@ -284,12 +295,16 @@ export const overviewRouter = createTRPCRouter({
           prev_views_per_session: previous?.metrics.views_per_session || null,
           prev_total_sessions: previous?.metrics.total_sessions || null,
           prev_total_revenue: previous?.metrics.total_revenue || null,
+          prev_avg_dau: avgDauPrevious?.metrics.avg_dau || null,
         },
         series: current.series.map((item, index) => {
           const prev = previous?.series[index];
+          const avgDauCurrentItem = avgDauCurrent.series[index];
+          const avgDauPrevItem = avgDauPrevious?.series[index];
           return {
             ...item,
             date: format(item.date, 'yyyy-MM-dd HH:mm:ss'),
+            avg_dau: avgDauCurrentItem?.avg_dau ?? 0,
             prev_bounce_rate: prev?.bounce_rate,
             prev_unique_visitors: prev?.unique_visitors,
             prev_total_screen_views: prev?.total_screen_views,
@@ -297,6 +312,7 @@ export const overviewRouter = createTRPCRouter({
             prev_views_per_session: prev?.views_per_session,
             prev_total_sessions: prev?.total_sessions,
             prev_total_revenue: prev?.total_revenue,
+            prev_avg_dau: avgDauPrevItem?.avg_dau,
           };
         }),
       };

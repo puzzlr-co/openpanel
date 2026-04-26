@@ -438,6 +438,75 @@ export class OverviewService {
     };
   }
 
+  // Avg DAU: average of daily uniq(device_id) over the window, scoped to
+  // session_start events (the OpenPanel SDK convention for a real client-side
+  // session). Headline is computed at day granularity regardless of the
+  // selected interval; the per-interval series uses the user's interval so the
+  // chart x-axis stays consistent with the rest of the overview.
+  async getAvgDau({
+    projectId,
+    filters,
+    startDate,
+    endDate,
+    interval,
+    timezone,
+  }: IGetMetricsInput): Promise<{
+    metrics: { avg_dau: number };
+    series: { date: string; avg_dau: number }[];
+  }> {
+    const fillConfig = this.getFillConfig(interval, startDate, endDate);
+
+    const seriesQuery = clix(this.client, timezone)
+      .select<{ date: string; avg_dau: number }>([
+        `${clix.toStartOf('created_at', interval as any, timezone)} AS date`,
+        'uniq(device_id) AS avg_dau',
+      ])
+      .from(TABLE_NAMES.events)
+      .where('project_id', '=', projectId)
+      .where('name', '=', 'session_start')
+      .where('created_at', 'BETWEEN', [
+        clix.datetime(startDate, 'toDateTime'),
+        clix.datetime(endDate, 'toDateTime'),
+      ])
+      .rawWhere(this.getRawWhereClause('events', filters))
+      .groupBy(['date'])
+      .orderBy('date', 'ASC')
+      .fill(fillConfig.from, fillConfig.to, fillConfig.step)
+      .transform({
+        date: (item) => convertClickhouseDateToJs(item.date).toISOString(),
+      });
+
+    const dailyDauCte = clix(this.client, timezone)
+      .select<{ day: string; dau: number }>([
+        'toDate(created_at) AS day',
+        'uniq(device_id) AS dau',
+      ])
+      .from(TABLE_NAMES.events)
+      .where('project_id', '=', projectId)
+      .where('name', '=', 'session_start')
+      .where('created_at', 'BETWEEN', [
+        clix.datetime(startDate, 'toDateTime'),
+        clix.datetime(endDate, 'toDateTime'),
+      ])
+      .rawWhere(this.getRawWhereClause('events', filters))
+      .groupBy(['day']);
+
+    const headlineQuery = clix(this.client, timezone)
+      .with('daily_dau', dailyDauCte)
+      .select<{ avg_dau: number }>(['round(avg(dau)) AS avg_dau'])
+      .from('daily_dau');
+
+    const [seriesRes, headlineRes] = await Promise.all([
+      seriesQuery.execute(),
+      headlineQuery.execute(),
+    ]);
+
+    return {
+      metrics: { avg_dau: headlineRes[0]?.avg_dau ?? 0 },
+      series: seriesRes,
+    };
+  }
+
   private async getMetricsWithPageFilter({
     projectId,
     filters,

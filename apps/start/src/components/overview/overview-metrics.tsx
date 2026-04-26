@@ -45,6 +45,12 @@ const TITLES = [
     inverted: false,
   },
   {
+    title: 'Avg DAU',
+    key: 'avg_dau',
+    unit: '',
+    inverted: false,
+  },
+  {
     title: 'Sessions',
     key: 'total_sessions',
     unit: '',
