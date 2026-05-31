@@ -661,6 +661,72 @@ export class OverviewService {
     };
   }
 
+  // Level completion rate: of levels started in the window, the % completed
+  // (level_completed / level_started), blended across all games. Puzzlr-
+  // specific. A blended pulse, not per-game truth — games with a fail state
+  // (e.g. Relink) blend "completed"/"won" semantics differently per game.
+  // Headline is a period-wide ratio; series mirrors it per bucket.
+  async getLevelCompletion({
+    projectId,
+    filters,
+    startDate,
+    endDate,
+    interval,
+    timezone,
+  }: IGetMetricsInput): Promise<{
+    metrics: { level_completion: number };
+    series: { date: string; level_completion: number }[];
+  }> {
+    const fillConfig = this.getFillConfig(interval, startDate, endDate);
+
+    const levelCompletionExpr =
+      "round(countIf(name = 'level_completed') * 100.0 / nullIf(countIf(name = 'level_started'), 0), 1) AS level_completion";
+
+    const seriesQuery = clix(this.client, timezone)
+      .select<{ date: string; level_completion: number }>([
+        `${clix.toStartOf('created_at', interval as any, timezone)} AS date`,
+        levelCompletionExpr,
+      ])
+      .from(TABLE_NAMES.events)
+      .where('project_id', '=', projectId)
+      .where('name', 'IN', ['level_started', 'level_completed'])
+      .where('created_at', 'BETWEEN', [
+        clix.datetime(startDate, 'toDateTime'),
+        clix.datetime(endDate, 'toDateTime'),
+      ])
+      .rawWhere(this.getRawWhereClause('events', filters))
+      .groupBy(['date'])
+      .orderBy('date', 'ASC')
+      .fill(fillConfig.from, fillConfig.to, fillConfig.step)
+      .transform({
+        date: (item) => convertClickhouseDateToJs(item.date).toISOString(),
+      });
+
+    const headlineQuery = clix(this.client, timezone)
+      .select<{ level_completion: number }>([levelCompletionExpr])
+      .from(TABLE_NAMES.events)
+      .where('project_id', '=', projectId)
+      .where('name', 'IN', ['level_started', 'level_completed'])
+      .where('created_at', 'BETWEEN', [
+        clix.datetime(startDate, 'toDateTime'),
+        clix.datetime(endDate, 'toDateTime'),
+      ])
+      .rawWhere(this.getRawWhereClause('events', filters));
+
+    const [seriesRes, headlineRes] = await Promise.all([
+      seriesQuery.execute(),
+      headlineQuery.execute(),
+    ]);
+
+    return {
+      metrics: { level_completion: headlineRes[0]?.level_completion ?? 0 },
+      series: seriesRes.map((row) => ({
+        date: row.date,
+        level_completion: row.level_completion ?? 0,
+      })),
+    };
+  }
+
   private async getMetricsWithPageFilter({
     projectId,
     filters,

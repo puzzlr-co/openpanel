@@ -58,6 +58,13 @@ const TITLES = [
     info: 'Share of sessions from a visitor who has been here before (first visit > 0 days ago). A conservative floor — incognito and cleared cookies push it down, never up.',
   },
   {
+    title: 'Level completion',
+    key: 'level_completion',
+    unit: '%',
+    inverted: false,
+    info: 'Of levels started in the window, the percentage completed (level_completed / level_started across all games). Blended pulse — games with a fail state read differently per game.',
+  },
+  {
     title: 'Multi-game sessions',
     key: 'multi_game_sessions',
     unit: '%',
