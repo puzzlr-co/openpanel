@@ -1,8 +1,11 @@
 # Query playbook — Puzzlr client snapshot
 
-Connection (from project memory): `ssh root@91.98.228.238 "docker exec self-hosting-op-ch-1 clickhouse-client --query \"...\""` against the `openpanel` database. Read-only.
+Connection (from project memory): pipe the SQL over stdin to avoid nested-quote mangling —
+`ssh root@91.98.228.238 'docker exec -i self-hosting-op-ch-1 clickhouse-client -d openpanel --query="<SQL>"'`. Read-only (SELECT only; clear any write with the user first).
 
 Substitute `<slug>` and date placeholders before running.
+
+**Quoting gotcha (validated):** through the nested ssh + docker quoting, a bare `BETWEEN '<start>' AND '<end>'` silently matches **0 rows** instead of erroring — a report built on that is silently empty and wrong. Always bound dates with explicit comparisons and a type-wrapped literal: `toDate(created_at) >= toDate('<start>') AND toDate(created_at) <= toDate('<end>')`. After every windowed query, sanity-check the row count is non-zero before trusting it. The queries below already use this form.
 
 ## 0. Confirm scope
 
@@ -87,7 +90,7 @@ SELECT properties['game_id'] AS game, count() AS sessions
 FROM openpanel.events
 WHERE project_id = '<slug>'
   AND name = 'session_started'
-  AND toDate(created_at) BETWEEN '<last_week_start>' AND '<last_week_end>'
+  AND toDate(created_at) >= toDate('<last_week_start>') AND toDate(created_at) <= toDate('<last_week_end>')
 GROUP BY game
 ORDER BY sessions DESC;
 ```
@@ -107,11 +110,12 @@ GROUP BY week
 ORDER BY week;
 ```
 
-## 7. Returning-rate climb (weekly)
+## 7. Returning-rate trend (weekly) — with new-visitor volume
 
 ```sql
 SELECT toMonday(toDate(created_at)) AS week,
        round(100.0 * countIf(toUInt32OrZero(properties['days_since_first_visit']) > 0) / count(), 1) AS returning_pct,
+       countIf(toUInt32OrZero(properties['days_since_first_visit']) = 0) AS new_visitor_sessions,
        count() AS total
 FROM openpanel.events
 WHERE project_id = '<slug>' AND name = 'session_started'
@@ -119,7 +123,7 @@ GROUP BY week
 ORDER BY week;
 ```
 
-Anchor narrative to first production week, not pre-launch test weeks.
+Anchor narrative to first production week, not pre-launch test weeks. **Read `returning_pct` against `new_visitor_sessions`:** returning rate is a share, so a jump in new visitors mechanically lowers it without anyone churning (acquisition dilution — see [methodology.md](methodology.md) §3). A falling share during a new-visitor surge is dilution, not decline. Never report "rising every week" unless the column literally rises every week.
 
 ## 8. Tenure composition (last full week)
 
@@ -137,7 +141,7 @@ FROM (
   FROM openpanel.events
   WHERE project_id = '<slug>'
     AND name = 'session_started'
-    AND toDate(created_at) BETWEEN '<last_week_start>' AND '<last_week_end>'
+    AND toDate(created_at) >= toDate('<last_week_start>') AND toDate(created_at) <= toDate('<last_week_end>')
 )
 GROUP BY band ORDER BY band;
 ```
@@ -150,12 +154,12 @@ SELECT toDate(created_at - INTERVAL toUInt32OrZero(properties['days_since_first_
 FROM openpanel.events
 WHERE project_id = '<slug>'
   AND name = 'session_started'
-  AND toDate(created_at) BETWEEN '<last_week_start>' AND '<last_week_end>'
+  AND toDate(created_at) >= toDate('<last_week_start>') AND toDate(created_at) <= toDate('<last_week_end>')
 GROUP BY first_visit_date
 ORDER BY first_visit_date;
 ```
 
-**This is session attribution, not a retention curve.** Frame accordingly (see [methodology.md](methodology.md)).
+**This is session attribution, not a retention curve.** Frame accordingly (see [methodology.md](methodology.md)). Note the right edge is censored: the most-recent `first_visit_date` rows cover visitors who arrived only a day or two ago and have barely had time to return, so they always read low — that is timing, not a worse group. Read the established dates, not the trailing edge.
 
 ## 10. Day-of-week, occurrence-normalised
 
@@ -167,7 +171,7 @@ SELECT toDayOfWeek(toDate(created_at)) AS dow,
 FROM openpanel.events
 WHERE project_id = '<slug>'
   AND name = 'session_started'
-  AND toDate(created_at) BETWEEN '<production_launch_date>' AND '<today>'
+  AND toDate(created_at) >= toDate('<production_launch_date>') AND toDate(created_at) <= toDate('<today>')
 GROUP BY dow
 ORDER BY dow;
 ```

@@ -43,13 +43,23 @@ a **tenure-mix / activity-share**, not a sized-cohort curve following one person
 - Never say "per user" / "per visitor" for any cohort metric from the event stream.
 - Never say "X% of the launch cohort returned" — we don't have the denominator.
 - Frame DN+/cohort views as: "Share of sessions from visitors who first played ≥ N days ago" or "Sessions in week N, grouped by when those visitors first arrived." Add the "how to read this view" paragraph on the slide.
-- The qualitative signal (every weekly group still producing sessions; rising returning rate) is real and worth reporting. The per-user magnitude is not available.
+- The qualitative signal (every weekly group still producing sessions; a returning rate that holds or climbs) is real and worth reporting. The per-user magnitude is not available.
 
-## 3. The "0% → X%" trap
+**Right-censoring fakes a closing cliff.** Any view that trends sessions by *recency* — the most-recent first-visit dates in the cohort view, or the latest week in any weekly series — is incomplete at its right edge. Visitors who first arrived one or two days ago have had almost no time to return yet, and the current week is still filling up. Plotted as-is, this always looks like a late drop-off that isn't real. Drop or clearly shade the trailing incomplete period; never read the last point of a recency series as a trend. (Validated in production: a cohort's most-recent week-N point read 6.5% while still censored vs ~16% once fully elapsed — a fake cliff.)
 
-Pre-launch test traffic (internal QA, soft sandbox) often shows 0% returning because there's only one event per device. Including that period creates a misleading "0% → 71%" story.
+## 3. Returning rate is a *share* — read it against new-visitor volume
 
-**Rule:** Anchor the returning-rate narrative to the **first production week** — the first week after daily session volume crossed ~100/day. Typical first-production-week returning rate: 20–25%. Use that as the baseline.
+`returning_pct` is the share of a period's sessions from a visitor with `days_since_first_visit > 0`. It is a ratio, not a count, so it moves for two very different reasons — and the deck must not confuse them.
+
+**Trap A — the "0% → X%" pre-launch trap.** Pre-launch test traffic (internal QA, soft sandbox) often shows 0% returning because there's only one event per device. Including that period creates a misleading "0% → 71%" story. *Rule:* anchor the returning-rate narrative to the **first production week** — the first week after daily session volume crossed ~100/day. Typical first-production-week returning rate: 20–25%.
+
+**Trap B — acquisition dilution.** Because it's a share, a surge of *new* visitors mechanically pushes returning rate **down** even when genuine retention is unchanged — the denominator just grew with Day-0 sessions. The reverse holds too: flat or shrinking intake makes the share drift up on its own. So:
+
+- A *falling* returning rate during a growth surge is usually dilution, not churn. Say "we acquired a wave of new visitors"; do not say "engagement is declining."
+- A *rising* returning rate only means stickier visitors if new-visitor volume held steady or grew. Check before claiming it.
+- Always read weekly new-visitor volume (Day-0 sessions) next to the returning-rate trend. Validated on a live deployment (early 2026): an acquisition surge dropped week-4 cohort stickiness from ~32–47% to ~16–23% while total volume soared. The honest read was "growing fast, newer visitors not yet as sticky" — not "retention collapsed," and not "X% returning, and rising."
+
+**Rule:** never hardcode an upward arc. Describe the trajectory the data actually shows — rising, flat, or diluted by growth — and name the cause only when new-visitor volume confirms it.
 
 ## 4. Day-of-week needs occurrence-normalisation
 
@@ -95,11 +105,12 @@ Audience: non-technical colleagues who will paraphrase to the client. Style:
 
 ## 8. What we report when in doubt
 
+- Trust **tenure composition (share of sessions by visitor-age band)** as the most robust retention signal. It is a headcount with no denominator, so — unlike returning rate or any cohort curve — it cannot be inflated by censoring or deflated by an acquisition surge (§2, §3). When the share-based views get murky, anchor on this one.
 - Trust **weekly active** > daily active > lifetime devices.
-- Trust **session_started returning_pct** > derived retention curves.
+- Trust **session_started returning_pct** > derived retention curves (but read it against new-visitor volume — §3).
 - Trust **per-game completion %** > per-game session counts as a quality signal.
 - Trust **tutorial resolution** (completed + skipped) > tutorial completion alone.
-- Trust **share of last-week sessions from `days_since_first_visit > 7`** as the strongest habit metric.
+- Trust **share of last-week sessions from `days_since_first_visit > 7`** as the strongest habit metric — but it is a share too, so a fresh acquisition surge will compress it without anyone leaving (see §3, Trap B).
 
 ## 9. What we do not claim
 

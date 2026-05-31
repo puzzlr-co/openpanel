@@ -38,9 +38,9 @@ Slide 03 · In four numbers
 | **<X%>** | of last week's sessions came from a returning visitor |
 | **<Y%>** | of every level started gets finished |
 
-One footer line anchoring the trajectory: "In the first week after launch, only N% of sessions were from a returning visitor. <N> weeks later it is M%, and rising."
+One footer line anchoring the trajectory, written to match what the data actually shows — do not assume it rose. If it climbed and held: "In the first week after launch, N% of sessions were from a returning visitor; <N> weeks later it is M%." If a growth surge pulled the share down, say so plainly: "Returning share moved from N% to M% as a wave of new visitors arrived — that is dilution from growth, not visitors leaving."
 
-*Never lead with lifetime `uniqExact(device_id)` — see methodology guardrails.*
+*Never lead with lifetime `uniqExact(device_id)`, and never hardcode an upward returning-rate arc — see methodology guardrails §3.*
 
 ---
 
@@ -91,7 +91,7 @@ Weekly active devices and sessions, since soft launch:
 | <date> | <n> | <n> | <n> |
 | … | … | … | … |
 
-One sentence on any single-day spikes (with date + game + likely cause: "promoted on the homepage" only if confirmed; otherwise "promoted on a Puzzlr surface"). End with the settled baseline range.
+One sentence on any single-day spikes (with date + game + likely cause: "promoted on the homepage" only if confirmed; otherwise "promoted on a Puzzlr surface"). End with the settled baseline range. If the latest week is still in progress, mark it partial or drop it — a half-finished week is not a downturn (methodology §2, right-censoring).
 
 ---
 
@@ -100,13 +100,13 @@ Slide 07 · Retention
 
 Up to four views. Drop a view if its signal is weak or contradicts the others.
 
-**View 1 — Returning-rate climb.** Weekly share of sessions from a returning visitor:
+**View 1 — Returning-rate trend.** Weekly share of sessions from a returning visitor, shown next to that week's new visitors so the share is read in context:
 
-| Week of | Returning rate |
-|---|---:|
-| … | …% |
+| Week of | Returning rate | New visitors that week |
+|---|---:|---:|
+| … | …% | … |
 
-One-line summary: "From X% in the first week to Y% and stable. Every one of the last N weeks has been higher than the one before."
+One-line summary describing the *actual* shape — rising-and-stable, flat, or diluted-by-growth are all legitimate reads; pick the true one. If new-visitor volume jumped, pair the dip with that context so it reads as growth dilution, not churn ("returning share eased from X% to Y% while new visitors roughly N×'d"). Only claim "higher every week" if it is literally true (methodology §3).
 
 **View 2 — Tenure composition (last full week).** Where last week's traffic came from, by visitor age:
 
@@ -120,6 +120,8 @@ One-line summary: "From X% in the first week to Y% and stable. Every one of the 
 
 One sentence on the share of traffic from visitors older than a week.
 
+*This is the most trustworthy retention view in the deck: a plain headcount of sessions by visitor age, with no denominator or ratio. Unlike View 1 (a share that an acquisition surge dilutes) and View 3 (whose recent edge is censored), it cannot manufacture a fake spike or a fake cliff. When those views get murky, lean on this one.*
+
 **View 3 — The early visitors are still here.** Each session is stamped with the visitor's first-ever visit date. Below: sessions during last week, grouped by when those visitors *originally* arrived.
 
 | First arrived on | Sessions during last week | Age of group |
@@ -128,7 +130,7 @@ One sentence on the share of traffic from visitors older than a week.
 
 One sentence noting that every weekly group since launch is still producing sessions.
 
-*How to read this view: the analytics tells us, for each session, the date that visitor first arrived — but for privacy reasons it does not give us a stable per-person ID. So the numbers above are total sessions attributable to each starting date, not "% of that group who came back." It is a strong directional signal that early visitors are still active; it is not a full retention curve.*
+*How to read this view: the analytics tells us, for each session, the date that visitor first arrived — but for privacy reasons it does not give us a stable per-person ID. So the numbers above are total sessions attributable to each starting date, not "% of that group who came back." It is a strong directional signal that early visitors are still active; it is not a full retention curve. The most recent arrival dates are also still filling in — someone who first arrived in the last day or two has barely had time to return, so the newest rows read low for timing reasons, not because those visitors are worse. Read the established dates, not the trailing edge.*
 
 **View 4 — Day-of-week shape.** Average sessions per day, averaged across the production window:
 

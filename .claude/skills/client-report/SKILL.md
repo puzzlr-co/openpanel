@@ -42,6 +42,8 @@ Quick-check list (the traps that have actually been hit):
 - **Never use lifetime `uniqExact(device_id)` as a "reach" headline** — the salt rotates daily. Lead with weekly-active instead.
 - **`session_started` carries no per-user ID for authenticated traffic** — never claim "per-user" retention or "X sessions per user." Cohort numbers are session attribution by first-visit date, not retention curves.
 - **"0% → X% returning" conflates pre-launch test traffic with the production story.** Anchor to the first production week (typically ~20–25% returning).
+- **Returning rate is a share — check new-visitor volume before reading its trend.** A growth surge pulls the share down (dilution), not churn. Never hardcode "rising"; describe the trajectory the data shows.
+- **Right-censoring fakes a closing cliff.** Drop or shade the latest incomplete week and the newest first-visit dates; never read the trailing edge of a recency series as decline.
 - **Day-of-week totals are biased by occurrence count and one-off promos.** Always report per-day averages and call out spike days.
 - **Country `uniq(device_id)` shares are reliable; absolutes are not.** Include the methodology note on the country slide.
 - **No named peer comparisons.** Use "fleet median," "Peer A/B/C," or "across active Puzzlr deployments."
