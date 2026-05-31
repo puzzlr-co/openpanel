@@ -595,6 +595,72 @@ export class OverviewService {
     };
   }
 
+  // Returning-visitor share: % of sessions started by a visitor who has been
+  // here before (days_since_first_visit > 0). Puzzlr-specific — relies on the
+  // `session_started` event and its `days_since_first_visit` property. A
+  // conservative floor: incognito/cleared cookies push it down, never up.
+  // Headline is a period-wide ratio; series mirrors it per bucket.
+  async getReturningRate({
+    projectId,
+    filters,
+    startDate,
+    endDate,
+    interval,
+    timezone,
+  }: IGetMetricsInput): Promise<{
+    metrics: { returning_rate: number };
+    series: { date: string; returning_rate: number }[];
+  }> {
+    const fillConfig = this.getFillConfig(interval, startDate, endDate);
+
+    const returningRateExpr =
+      "round(countIf(toUInt32OrZero(properties['days_since_first_visit']) > 0) * 100.0 / nullIf(count(), 0), 1) AS returning_rate";
+
+    const seriesQuery = clix(this.client, timezone)
+      .select<{ date: string; returning_rate: number }>([
+        `${clix.toStartOf('created_at', interval as any, timezone)} AS date`,
+        returningRateExpr,
+      ])
+      .from(TABLE_NAMES.events)
+      .where('project_id', '=', projectId)
+      .where('name', '=', 'session_started')
+      .where('created_at', 'BETWEEN', [
+        clix.datetime(startDate, 'toDateTime'),
+        clix.datetime(endDate, 'toDateTime'),
+      ])
+      .rawWhere(this.getRawWhereClause('events', filters))
+      .groupBy(['date'])
+      .orderBy('date', 'ASC')
+      .fill(fillConfig.from, fillConfig.to, fillConfig.step)
+      .transform({
+        date: (item) => convertClickhouseDateToJs(item.date).toISOString(),
+      });
+
+    const headlineQuery = clix(this.client, timezone)
+      .select<{ returning_rate: number }>([returningRateExpr])
+      .from(TABLE_NAMES.events)
+      .where('project_id', '=', projectId)
+      .where('name', '=', 'session_started')
+      .where('created_at', 'BETWEEN', [
+        clix.datetime(startDate, 'toDateTime'),
+        clix.datetime(endDate, 'toDateTime'),
+      ])
+      .rawWhere(this.getRawWhereClause('events', filters));
+
+    const [seriesRes, headlineRes] = await Promise.all([
+      seriesQuery.execute(),
+      headlineQuery.execute(),
+    ]);
+
+    return {
+      metrics: { returning_rate: headlineRes[0]?.returning_rate ?? 0 },
+      series: seriesRes.map((row) => ({
+        date: row.date,
+        returning_rate: row.returning_rate ?? 0,
+      })),
+    };
+  }
+
   private async getMetricsWithPageFilter({
     projectId,
     filters,

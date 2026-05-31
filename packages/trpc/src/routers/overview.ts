@@ -272,6 +272,7 @@ export const overviewRouter = createTRPCRouter({
         { current, previous },
         { current: avgDauCurrent, previous: avgDauPrevious },
         { current: multiGameCurrent, previous: multiGamePrevious },
+        { current: returningCurrent, previous: returningPrevious },
       ] = await Promise.all([
         getCurrentAndPrevious(
           { ...input, timezone },
@@ -288,12 +289,18 @@ export const overviewRouter = createTRPCRouter({
           true,
           timezone,
         )(overviewService.getMultiGameSessions.bind(overviewService)),
+        getCurrentAndPrevious(
+          { ...input, timezone },
+          true,
+          timezone,
+        )(overviewService.getReturningRate.bind(overviewService)),
       ]);
       return {
         metrics: {
           ...current.metrics,
           avg_dau: avgDauCurrent.metrics.avg_dau,
           multi_game_sessions: multiGameCurrent.metrics.multi_game_sessions,
+          returning_rate: returningCurrent.metrics.returning_rate,
           prev_bounce_rate: previous?.metrics.bounce_rate || null,
           prev_unique_visitors: previous?.metrics.unique_visitors || null,
           prev_total_screen_views: previous?.metrics.total_screen_views || null,
@@ -305,6 +312,7 @@ export const overviewRouter = createTRPCRouter({
           prev_avg_dau: avgDauPrevious?.metrics.avg_dau || null,
           prev_multi_game_sessions:
             multiGamePrevious?.metrics.multi_game_sessions || null,
+          prev_returning_rate: returningPrevious?.metrics.returning_rate || null,
         },
         series: current.series.map((item, index) => {
           const prev = previous?.series[index];
@@ -312,12 +320,15 @@ export const overviewRouter = createTRPCRouter({
           const avgDauPrevItem = avgDauPrevious?.series[index];
           const multiGameCurrentItem = multiGameCurrent.series[index];
           const multiGamePrevItem = multiGamePrevious?.series[index];
+          const returningCurrentItem = returningCurrent.series[index];
+          const returningPrevItem = returningPrevious?.series[index];
           return {
             ...item,
             date: format(item.date, 'yyyy-MM-dd HH:mm:ss'),
             avg_dau: avgDauCurrentItem?.avg_dau ?? 0,
             multi_game_sessions:
               multiGameCurrentItem?.multi_game_sessions ?? 0,
+            returning_rate: returningCurrentItem?.returning_rate ?? 0,
             prev_bounce_rate: prev?.bounce_rate,
             prev_unique_visitors: prev?.unique_visitors,
             prev_total_screen_views: prev?.total_screen_views,
@@ -327,6 +338,7 @@ export const overviewRouter = createTRPCRouter({
             prev_total_revenue: prev?.total_revenue,
             prev_avg_dau: avgDauPrevItem?.avg_dau,
             prev_multi_game_sessions: multiGamePrevItem?.multi_game_sessions,
+            prev_returning_rate: returningPrevItem?.returning_rate,
           };
         }),
       };

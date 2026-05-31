@@ -51,6 +51,13 @@ const TITLES = [
     inverted: false,
   },
   {
+    title: 'Returning visitors',
+    key: 'returning_rate',
+    unit: '%',
+    inverted: false,
+    info: 'Share of sessions from a visitor who has been here before (first visit > 0 days ago). A conservative floor — incognito and cleared cookies push it down, never up.',
+  },
+  {
     title: 'Multi-game sessions',
     key: 'multi_game_sessions',
     unit: '%',
