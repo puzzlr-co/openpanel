@@ -357,6 +357,57 @@ export const overviewRouter = createTRPCRouter({
       };
     }),
 
+  // Tenure composition over time (the "tenure river"), derived from
+  // days_since_first_visit. Powers the retention section's stock signal.
+  tenureSeries: overviewProcedure
+    .input(
+      zGetMetricsInput.omit({ startDate: true, endDate: true }).extend({
+        startDate: z.string().nullish(),
+        endDate: z.string().nullish(),
+        range: zRange,
+        shareId: z.string().optional(),
+      }),
+    )
+    .use(cacher)
+    .query(async ({ input }) => {
+      const { timezone } = await getSettingsForProject(input.projectId);
+      const { startDate, endDate } = getChartStartEndDate(input, timezone);
+      return overviewService.getTenureSeries({
+        projectId: input.projectId,
+        filters: input.filters,
+        interval: input.interval,
+        startDate,
+        endDate,
+        timezone,
+      });
+    }),
+
+  // Cohort activity retention from days_since_first_visit. Returns flat
+  // (cohort_week, life_week, sessions) rows; the client pivots into curves.
+  // Powers the retention section's flow signal.
+  cohortRetention: overviewProcedure
+    .input(
+      zGetMetricsInput.omit({ startDate: true, endDate: true }).extend({
+        startDate: z.string().nullish(),
+        endDate: z.string().nullish(),
+        range: zRange,
+        shareId: z.string().optional(),
+      }),
+    )
+    .use(cacher)
+    .query(async ({ input }) => {
+      const { timezone } = await getSettingsForProject(input.projectId);
+      const { startDate, endDate } = getChartStartEndDate(input, timezone);
+      return overviewService.getCohortRetention({
+        projectId: input.projectId,
+        filters: input.filters,
+        interval: input.interval,
+        startDate,
+        endDate,
+        timezone,
+      });
+    }),
+
   getReferrerSpikes: overviewProcedure
     .input(
       zGetMetricsInput.omit({ startDate: true, endDate: true }).extend({

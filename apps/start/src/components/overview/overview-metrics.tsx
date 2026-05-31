@@ -55,7 +55,7 @@ const TITLES = [
     key: 'returning_rate',
     unit: '%',
     inverted: false,
-    info: 'Share of sessions from a visitor who has been here before (first visit > 0 days ago). A conservative floor — incognito and cleared cookies push it down, never up.',
+    info: 'Share of sessions from someone who has visited before. This is a minimum, not an exact count: private windows and cleared cookies push it down, never up. If it dips while your traffic grows, that usually just means a lot of brand-new visitors arrived at once, not that people are leaving. Read it together with the retention charts below.',
   },
   {
     title: 'Level completion',

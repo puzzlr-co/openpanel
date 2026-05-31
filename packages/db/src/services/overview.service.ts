@@ -24,6 +24,13 @@ const INCLUDE_REVENUE = true; // TODO: Make this configurable later
 // Maximum number of records to return (for detail modals)
 const MAX_RECORDS_LIMIT = 1000;
 
+// Cohort-retention look-back: how far before endDate getCohortRetention scans for
+// first-visit cohorts, decoupled from the display window so each shown cohort's
+// full week-0 denominator is counted, but bounded so the scan never walks full
+// project history on large projects.
+const DAY_MS = 24 * 60 * 60 * 1000;
+const COHORT_LOOKBACK_DAYS = 180;
+
 const COLUMN_PREFIX_MAP: Record<string, string> = {
   region: 'country',
   city: 'country',
@@ -659,6 +666,157 @@ export class OverviewService {
         returning_rate: row.returning_rate ?? 0,
       })),
     };
+  }
+
+  // Tenure composition over time (the "tenure river"). Sessions per interval
+  // split by visitor age, derived purely from days_since_first_visit. Single
+  // GROUP BY scan over session_started, modelled on getReturningRate. Puzzlr-
+  // specific (relies on the session_started event + its dsfv property). A stock
+  // signal with no denominator, so it cannot manufacture a >100% spike.
+  async getTenureSeries({
+    projectId,
+    filters,
+    startDate,
+    endDate,
+    interval,
+    timezone,
+  }: IGetMetricsInput): Promise<
+    {
+      date: string;
+      bucket_new: number;
+      bucket_1_7: number;
+      bucket_8_30: number;
+      bucket_30: number;
+    }[]
+  > {
+    const fillConfig = this.getFillConfig(interval, startDate, endDate);
+    const dsfv = "toUInt32OrZero(properties['days_since_first_visit'])";
+
+    const query = clix(this.client, timezone)
+      .select<{
+        date: string;
+        bucket_new: number;
+        bucket_1_7: number;
+        bucket_8_30: number;
+        bucket_30: number;
+      }>([
+        `${clix.toStartOf('created_at', interval as any, timezone)} AS date`,
+        `countIf(${dsfv} = 0) AS bucket_new`,
+        `countIf(${dsfv} >= 1 AND ${dsfv} <= 7) AS bucket_1_7`,
+        `countIf(${dsfv} >= 8 AND ${dsfv} <= 30) AS bucket_8_30`,
+        `countIf(${dsfv} > 30) AS bucket_30`,
+      ])
+      .from(TABLE_NAMES.events)
+      .where('project_id', '=', projectId)
+      .where('name', '=', 'session_started')
+      .where('created_at', 'BETWEEN', [
+        clix.datetime(startDate, 'toDateTime'),
+        clix.datetime(endDate, 'toDateTime'),
+      ])
+      .rawWhere(this.getRawWhereClause('events', filters))
+      .groupBy(['date'])
+      .orderBy('date', 'ASC')
+      .fill(fillConfig.from, fillConfig.to, fillConfig.step)
+      .transform({
+        date: (item) => convertClickhouseDateToJs(item.date).toISOString(),
+      });
+
+    const res = await query.execute();
+    return res.map((row) => ({
+      date: row.date,
+      bucket_new: row.bucket_new ?? 0,
+      bucket_1_7: row.bucket_1_7 ?? 0,
+      bucket_8_30: row.bucket_8_30 ?? 0,
+      bucket_30: row.bucket_30 ?? 0,
+    }));
+  }
+
+  // Cohort activity retention from days_since_first_visit alone. Puzzlr-specific.
+  // cohort_week = first-visit week = created_at - days_since_first_visit.
+  // life_week   = days_since_first_visit / 7 (weeks since first visit).
+  // Returns flat (cohort_week, life_week, sessions) rows; the client pivots into
+  // a curve. No self-join, no cross-day identity — one scan over session_started.
+  //
+  // Cohort history is DECOUPLED from the display window to keep the picture
+  // honest, while staying bounded for production-wide use:
+  //   • The lower `created_at` bound is a fixed, generous look-back
+  //     (COHORT_LOOKBACK_DAYS) rather than the display window — so each shown
+  //     cohort's full week-0 (first 7 days) and life-weeks are counted, not just
+  //     the slice inside the range. A windowed lower bound left-censors the
+  //     denominator and manufactures >100% retention (e.g. a cohort whose true
+  //     week-0 of 154 gets clipped to 34 → a fake 250%). Decoupling it from the
+  //     display window but still bounding it keeps the scan from walking full
+  //     project history on every uncached load. Decoupling does NOT remove the
+  //     seam, only move it to lookbackStart — the HAVING below censors the one
+  //     cohort still straddling that bound (see LEFT guard).
+  //   • The HAVING censors BOTH boundaries so every point has a complete
+  //     numerator and denominator: a LEFT guard (cohort_week >= lookbackStart)
+  //     drops the straddling cohort whose week-0 would be truncated, and a RIGHT
+  //     guard drops not-yet-elapsed life-weeks (recent cohorts show fewer points
+  //     instead of a fake instant-churn cliff). dsfv already encodes age, one scan.
+  // Tiny launch-era / instrumentation-seam cohorts (and their >100% noise) are
+  // filtered client-side by a min-denominator threshold in pivotCohorts.
+  async getCohortRetention({
+    projectId,
+    filters,
+    endDate,
+    timezone,
+  }: IGetMetricsInput): Promise<
+    { cohort_week: string; life_week: number; sessions: number }[]
+  > {
+    const dsfv = "toUInt32OrZero(properties['days_since_first_visit'])";
+    const cohortWeek = `toStartOfWeek(subtractDays(toDate(created_at), ${dsfv}))`;
+    const lifeWeek = `intDiv(${dsfv}, 7)`;
+
+    // Generous fixed look-back, decoupled from the display window: long enough to
+    // mature the deepest life-week the client plots (weekly cohorts at week ≤4
+    // need ~5 weeks), short enough to bound the scan on large projects.
+    const lookbackStart = new Date(
+      new Date(endDate).getTime() - COHORT_LOOKBACK_DAYS * DAY_MS,
+    );
+
+    const query = clix(this.client, timezone)
+      .select<{ cohort_week: string; life_week: number; sessions: number }>([
+        `${cohortWeek} AS cohort_week`,
+        `${lifeWeek} AS life_week`,
+        'count() AS sessions',
+      ])
+      .from(TABLE_NAMES.events)
+      .where('project_id', '=', projectId)
+      .where('name', '=', 'session_started')
+      .where('created_at', '>=', clix.datetime(lookbackStart, 'toDateTime'))
+      .where('created_at', '<=', clix.datetime(endDate, 'toDateTime'))
+      .rawWhere(this.getRawWhereClause('events', filters))
+      .groupBy(['cohort_week', 'life_week'])
+      // Censor BOTH boundaries so every plotted retention point has a complete
+      // numerator and denominator:
+      //  • LEFT — drop the cohort straddling lookbackStart. The lower bound is on
+      //    `created_at` (session date), so that cohort's week-0 denominator is
+      //    truncated (its earliest week-0 sessions fall before lookbackStart) while
+      //    its later-week numerators are fully counted → inflated retention at F's
+      //    left-most point, biasing the trend verdict toward "Worsening". Requiring
+      //    cohort_week >= lookbackStart keeps only cohorts whose first-visit week
+      //    starts in-window, so their full week-0 is captured. (Decoupling the
+      //    look-back from the display window does NOT remove this seam — it only
+      //    moves it to lookbackStart; this guard closes it.)
+      //  • RIGHT — keep a life-week only once it is fully observed for EVERY member
+      //    of the cohort-week. cohort_week is the week start, but members join
+      //    across the whole 7-day week, so the latest joiner (cohort_week + 6)
+      //    finishes life-week L on cohort_week + L*7 + 6 + 6. Bounding on +12 (not
+      //    +6) avoids partially censoring each cohort's most-recent point, which
+      //    would otherwise depress the last point and fake a closing cliff.
+      .rawHaving(
+        `cohort_week >= toDate('${clix.date(lookbackStart)}') AND addDays(cohort_week, life_week * 7 + 12) <= toDate('${clix.date(endDate)}')`,
+      )
+      .orderBy('cohort_week', 'ASC')
+      .orderBy('life_week', 'ASC');
+
+    const res = await query.execute();
+    return res.map((row) => ({
+      cohort_week: String(row.cohort_week).slice(0, 10),
+      life_week: Number(row.life_week) || 0,
+      sessions: row.sessions ?? 0,
+    }));
   }
 
   // Level completion rate: of levels started in the window, the % completed
