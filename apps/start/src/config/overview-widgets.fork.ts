@@ -5,7 +5,8 @@ import {
 } from './overview-widgets';
 
 // === Widget customization ===
-// Hide Revenue / Pageviews / Pages-per-session / Bounce Rate metrics, remove Insights widget
+// Hide Revenue / Pageviews / Pages-per-session / Bounce Rate metrics, remove
+// Insights / Top Sources / Top Pages widgets
 const HIDDEN_METRIC_KEYS = ['total_revenue', 'total_screen_views', 'views_per_session', 'bounce_rate'];
 
 // Retention section (Tenure River + Cohort Quality) — honest stock + flow
@@ -18,11 +19,17 @@ const RETENTION: OverviewWidgetDef = {
   lazyViewport: true,
 };
 
+// Widgets removed from the overview entirely:
+// - insights (upstream dashboard-only widget)
+// - top-sources (Refs/Urls/Types/Source/Medium/Campaign/Term/Content)
+// - top-pages (Pages/Entries/Exits)
+const REMOVED_WIDGET_KEYS = ['insights', 'top-sources', 'top-pages'];
+
 const FORK_WIDGETS: OverviewWidgetDef[] = DEFAULT_WIDGETS
   .map(w => (w.key === 'metrics' || w.key === 'weekly-trends')
     ? { ...w, props: { excludeMetricKeys: HIDDEN_METRIC_KEYS } }
     : w)
-  .filter(w => w.key !== 'insights')
+  .filter(w => !REMOVED_WIDGET_KEYS.includes(w.key))
   // insert the retention section right after the metrics widget
   .flatMap(w => w.key === 'metrics' ? [w, RETENTION] : [w]);
 
