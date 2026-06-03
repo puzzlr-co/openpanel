@@ -39,9 +39,9 @@ No architectural changes — same 6-service Docker Compose stack. Key version bu
 | 1. Local Preparation | Done (2026-03-17) |
 | 2. Local Testing | Done (2026-03-18) |
 | 2.4 Overview Customization Scaffold | Done (2026-03-24) |
-| 2.5 Custom Widgets | **Next** |
-| 3. VPS Backup | Pending |
-| 4. VPS Upgrade | Pending |
+| 2.5 Custom Widgets | Done (2026-06-02, images 2.0.0 pushed) |
+| 3. VPS Backup | Done (2026-06-03) |
+| 4. VPS Upgrade | **Next** |
 | 5. Verification | Pending |
 
 ### Implementation Phases
@@ -262,6 +262,11 @@ pnpm dev  # Start dev servers
 
 **All commands are READ-ONLY or create new files. No modifications to running system.**
 
+**Completed 2026-06-03 (~16:45 server time).** All artifacts verified on the VPS:
+`/root/backup-pre-v2.sql` (86K, dump-complete marker + org secret column confirmed), `/root/backup-ch-counts.txt`, `/root/backup-{events,sessions,profiles,profile_aliases,events_bots}.csv` (18G / 2.0G / 809M / 47B / 671K), `/root/backup-image-ids.txt`, `/root/backup-container-state.txt`, and `.env.backup-pre-v2` + `docker-compose.yml.backup-pre-v2` in `~/openpanel/self-hosting`. 71 GB disk remains free.
+
+> **⚠️ Data volume has grown ~6.4× since this plan was written:** production now holds **36.75M events, 2.79M sessions, 2.42M profiles** (plan assumed 5.7M/478K/416K). Despite the growth, the events table is only **1.38 GiB on disk** (sessions 365 MiB) — migration #8's copy is realistically **minutes** on the VPS's 8 cores (largest monthly chunk = 20.25M rows, vs a 1h/statement ClickHouse timeout). Keep `start_period: 600s`. Expected total downtime ~15–25 min.
+
 ##### 3.1 Postgres backup (with --clean for restorability)
 
 ```bash
@@ -284,6 +289,8 @@ done
 
 **Note:** CSV format is used instead of Native because migration #8 changes the events/sessions table schema (different ORDER BY, added `revenue` column, dropped `properties` from sessions). CSV can be loaded into any schema.
 
+**Superseded (2026-06-03):** the cold volume tars in Phase 4.3 dominate the CSV exports for rollback (byte-exact restore, 6.2 GB vs 18 GB of CSVs). Treat CSV exports as optional for future runs.
+
 ##### 3.3 Config backup
 
 ```bash
@@ -303,7 +310,9 @@ ssh root@91.98.228.238 'docker ps --format "table {{.Names}}\t{{.Image}}\t{{.Sta
 
 **Schedule during low-traffic window (02:00-04:00 CET recommended for Swiss news clients).**
 
-Expected downtime: 10-20 minutes (dominated by ClickHouse migration #8).
+Expected downtime: ~15–25 minutes (migration #8 copies ~1.4 GiB on disk — minutes, not hours; the migration client's 1h/statement timeout has ~12× headroom).
+
+**Run the whole phase from an interactive SSH session inside `tmux` on the VPS** (`ssh -t root@91.98.228.238 tmux new -s upgrade`) — a dropped connection must not kill a step mid-flight.
 
 ##### 4.1 Drain worker queues
 
@@ -320,9 +329,21 @@ ssh root@91.98.228.238 'docker exec self-hosting-op-kv-1 redis-cli LLEN bull:eve
 
 ```bash
 ssh root@91.98.228.238 'cd ~/openpanel/self-hosting && ./stop'
+
+# Gate: must print nothing before touching volumes (4.3)
+ssh root@91.98.228.238 'docker ps --format "{{.Names}}"'
 ```
 
-##### 4.3 Update .env
+##### 4.3 Cold backup of data volumes (the rollback path)
+
+ClickHouse 24.3 cannot read a data dir that 25.x has written to — 25.5 compact-part marks (ClickHouse PR #84171: "servers with version less than 25.5 won't be able to read new Compact parts") and 25.10 String serialization (2025 changelog: "downgrading to versions before 25.10 will not be possible"). Once CH 25 boots in 4.7, these tars are the **only** way back.
+
+```bash
+ssh root@91.98.228.238 'tar -C /var/lib/docker/volumes/self-hosting_op-ch-data -czf /root/backup-ch-datadir.tar.gz _data'  # 6.2 GB, ~3 min
+ssh root@91.98.228.238 'tar -C /var/lib/docker/volumes/self-hosting_op-db-data -czf /root/backup-pg-datadir.tar.gz _data'  # 60 MB, seconds
+```
+
+##### 4.4 Update .env
 
 ```bash
 ssh root@91.98.228.238 'cd ~/openpanel/self-hosting && cat .env'
@@ -350,7 +371,7 @@ ssh root@91.98.228.238 'cd ~/openpanel/self-hosting && cat .env'
 
 Changes: rename `VITE_SELF_HOSTED` → `SELF_HOSTED`, remove `BATCH_SIZE` and `BATCH_INTERVAL`. All other vars keep their existing values.
 
-##### 4.4 Update docker-compose.yml
+##### 4.5 Update docker-compose.yml
 
 Key changes:
 
@@ -374,34 +395,69 @@ op-worker:
   image: keiwanmosaddegh/openpanel-worker:2.0.0  # was :latest
 ```
 
-##### 4.5 Pull new images
+##### 4.6 Pull new images
 
 ```bash
 ssh root@91.98.228.238 'cd ~/openpanel/self-hosting && docker compose pull'
 ```
 
-##### 4.6 Start services
+##### 4.7 Start databases and sanity-check ClickHouse 25
+
+```bash
+ssh root@91.98.228.238 'cd ~/openpanel/self-hosting && docker compose up -d op-db op-ch op-kv'
+
+# CH 25 boots cleanly on the old data dir
+ssh root@91.98.228.238 'docker exec self-hosting-op-ch-1 clickhouse-client --query "SELECT version()"'
+
+# Capture the migration baseline — authoritative for 4.9
+# (Phase 3 counts are stale: taken while still ingesting)
+ssh root@91.98.228.238 'docker exec self-hosting-op-ch-1 clickhouse-client --query "SELECT count() FROM openpanel.events" | tee /root/baseline-events.txt'
+ssh root@91.98.228.238 'docker exec self-hosting-op-ch-1 clickhouse-client --query "SELECT count() FROM openpanel.sessions" | tee /root/baseline-sessions.txt'
+```
+
+##### 4.8 Supervised one-off migration
+
+Run inside the tmux session on the VPS:
+
+```bash
+cd ~/openpanel/self-hosting
+docker compose run --rm --no-deps op-api sh -c "CI=true pnpm -r run migrate:deploy"
+```
+
+Why `compose run` instead of `./start`: op-api's normal startup runs the same migrations under `restart: always` — a failed migration exits 1 and auto-re-runs from the beginning, and migration #8 (no checkpoint, no dedup; sessions' VersionedCollapsingMergeTree doesn't collapse re-inserted rows either) would duplicate data. `compose run --rm` applies no restart policy: **failure halts.** `--no-deps` is safe — db/ch/kv are already up from 4.7. The image has no ENTRYPOINT and ships the full pnpm workspace, so this runs exactly what startup would, minus `pnpm start`.
+
+```text
+# Expected output:
+# Prisma migrate deploy: 11 migrations applied
+# Code migrations 6→12 run in order; #8 (order-keys) copies events/sessions
+# month-by-month (minutes), then renames tables
+# exits 0
+```
+
+**If #8 fails**, check `SHOW TABLES FROM openpanel` and repair per this table. #8 ends with 4 sequential RENAME statements (`packages/db/code-migrations/8-order-keys.ts:250-283`), so the state tells you where it died:
+
+| State | Meaning | Repair |
+|---|---|---|
+| `events` + `events_new_20251123` exist, no `events_20251123` | Failed during copy | `DROP TABLE openpanel.events_new_20251123` and `openpanel.sessions_new_20251123` → fix cause → re-run 4.8 |
+| `events_20251123` exists, `events` missing | Died mid-rename | Finish the remaining renames by hand (statements are in the generated `8-order-keys.sql` next to the migration in the container) → verify counts (4.9) → record completion in Postgres: `INSERT INTO "__code_migrations" (name) VALUES ('8-order-keys.ts')` |
+| All renames done but migration unrecorded | Died after last rename, before the Postgres record | Verify counts (4.9) → insert the record row as above. **Never re-run 4.8 in this state** — it would copy the new `events` into a fresh `_new_` table and fail on rename. |
+
+##### 4.9 Verify counts
+
+Exact equality required — nothing ingests while proxy/api are down:
+
+```bash
+ssh root@91.98.228.238 'docker exec self-hosting-op-ch-1 clickhouse-client --query "SELECT (SELECT count() FROM openpanel.events) = (SELECT count() FROM openpanel.events_20251123) AS events_match, (SELECT count() FROM openpanel.sessions) = (SELECT count() FROM openpanel.sessions_20251123) AS sessions_match"'
+# Expect: 1  1 — and events count must equal /root/baseline-events.txt from 4.7
+```
+
+##### 4.10 Start the full stack
 
 ```bash
 ssh root@91.98.228.238 'cd ~/openpanel/self-hosting && ./start'
-```
+# op-api's in-container migrate:deploy no-ops (all migrations recorded) and the stack comes up in one shot
 
-##### 4.7 Monitor migrations
-
-```bash
-# Watch API logs for migration progress
 ssh root@91.98.228.238 'cd ~/openpanel/self-hosting && docker compose logs -f op-api'
-
-# Expected output:
-# "Running migrations..."
-# Prisma migrate deploy: 11 migrations applied
-# Code migration 6-add-revenue-column: done
-# Code migration 7-migrate-events-to-series: done
-# Code migration 8-order-keys: copying events... (5-15 minutes)
-# Code migration 9-migrate-options: done
-# Code migration 10-add-session-replay: done
-# Code migration 12-add-gsc: done
-# "pnpm start" — API server listening
 ```
 
 ---
@@ -426,7 +482,7 @@ curl -s -o /dev/null -w "%{http_code}" https://activity.puzzlr.net
 ```bash
 # ClickHouse event count matches pre-upgrade
 ssh root@91.98.228.238 'docker exec self-hosting-op-ch-1 clickhouse-client --query "SELECT count() FROM openpanel.events"'
-# Compare with backup-ch-counts.txt
+# Must be ≥ /root/baseline-events.txt (the 4.7 baseline; grows once ingestion resumes)
 
 # Postgres tables exist
 ssh root@91.98.228.238 'docker exec self-hosting-op-db-1 psql -U postgres -c "\dt" | wc -l'
@@ -450,8 +506,8 @@ ssh root@91.98.228.238 'docker exec self-hosting-op-db-1 psql -U postgres -c "\d
 ssh root@91.98.228.238 'docker exec self-hosting-op-ch-1 clickhouse-client --query "DROP TABLE IF EXISTS openpanel.events_20251123"'
 ssh root@91.98.228.238 'docker exec self-hosting-op-ch-1 clickhouse-client --query "DROP TABLE IF EXISTS openpanel.sessions_20251123"'
 
-# Remove backup files
-ssh root@91.98.228.238 'rm /root/backup-pre-v2.sql /root/backup-*.csv /root/backup-*.txt'
+# Remove backup files (including the cold volume tars and 4.7 baselines)
+ssh root@91.98.228.238 'rm /root/backup-pre-v2.sql /root/backup-*.csv /root/backup-*.txt /root/backup-*.tar.gz /root/baseline-*.txt'
 ```
 
 ---
@@ -469,7 +525,7 @@ ssh root@91.98.228.238 'rm /root/backup-pre-v2.sql /root/backup-*.csv /root/back
 ### Error & Failure Propagation
 
 - **Migration failure**: Code migration runner records completion in Postgres `__code_migrations` table only on success. Partial failures leave intermediate tables (e.g., `events_new_20251123`). On restart, `CREATE TABLE IF NOT EXISTS` prevents re-creation errors, but `INSERT INTO ... SELECT *` will re-copy partially copied data, causing duplicates.
-- **Mitigation**: `start_period: 600s` on healthcheck prevents Docker from restarting during migrations.
+- **Mitigation**: migrations run supervised via `docker compose run --rm` (no restart policy — failure halts; Phase 4.8). `start_period: 600s` remains as belt-and-braces for the subsequent `./start`.
 
 ### State Lifecycle Risks
 
@@ -503,7 +559,7 @@ ssh root@91.98.228.238 'rm /root/backup-pre-v2.sql /root/backup-*.csv /root/back
 
 ### Non-Functional Requirements
 
-- [ ] Downtime < 20 minutes
+- [ ] Downtime < 30 minutes
 - [ ] Zero data loss on existing events/sessions/profiles
 - [ ] Full rollback capability tested before production upgrade
 - [ ] Auth cache keys use SHA-256 (not base64 plaintext)
@@ -527,8 +583,8 @@ ssh root@91.98.228.238 'rm /root/backup-pre-v2.sql /root/backup-*.csv /root/back
 
 | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|
-| Docker restarts API during migration #8 | High (without fix) | Critical — data duplication | Add `start_period: 600s` to healthcheck |
-| ClickHouse 24→25 data incompatibility | Low | Critical | Test with prod data locally first |
+| Docker restarts API during migration #8 | High (without fix) | Critical — data duplication | Supervised one-off migration via `compose run` (4.8) — no restart policy; `start_period: 600s` as belt-and-braces |
+| ClickHouse 24→25 one-way door (no downgrade) | Certain once CH 25 writes parts | Critical | Cold volume tars before first CH 25 boot (4.3) |
 | Prisma migration checksum mismatch | None (verified) | Critical | Already verified — all checksums match |
 | Worker queue format incompatibility | Low | Medium | Drain queues before upgrade |
 | Org secret bcrypt hash incompatibility | Very low | Medium | Same bcrypt library, same hash format |
@@ -536,39 +592,31 @@ ssh root@91.98.228.238 'rm /root/backup-pre-v2.sql /root/backup-*.csv /root/back
 
 ## Rollback Plan
 
-### Before migration #8 completes
+> "Restart with old images" is **invalid once ClickHouse 25 has booted on the data dir** (Phase 4.7 onward) — 24.3 cannot read parts written by 25.x (ClickHouse PR #84171; 25.10 String serialization change). The cold volume tars from 4.3 are the rollback path. Migration-failure *recovery* (continue forward) is handled in 4.8 — this section is for *abandoning* the upgrade.
+
+### Before 4.7 (CH 25 never booted)
+
+Nothing has touched the data — only configs changed. Restore them and start the old stack:
 
 ```bash
-# Stop app services but keep databases running for restore
-ssh root@91.98.228.238 'cd ~/openpanel/self-hosting && docker compose stop op-api op-dashboard op-worker op-proxy'
-
-# Restore Postgres from backup (DB container still running)
-ssh root@91.98.228.238 'docker exec -i self-hosting-op-db-1 psql -U postgres postgres < /root/backup-pre-v2.sql'
-
-# Restore configs
-ssh root@91.98.228.238 'cd ~/openpanel/self-hosting && cp .env.backup-pre-v2 .env && cp docker-compose.yml.backup-pre-v2 docker-compose.yml'
-
-# Restart everything with old config
-ssh root@91.98.228.238 'cd ~/openpanel/self-hosting && ./stop && ./start'
+ssh root@91.98.228.238 'cd ~/openpanel/self-hosting && cp .env.backup-pre-v2 .env && cp docker-compose.yml.backup-pre-v2 docker-compose.yml && ./start'
 ```
 
-### After migration #8 completes (ClickHouse tables renamed)
+### From 4.7 onward (CH 25 has written to the volume)
 
 ```bash
-# Stop app services but keep databases running
-ssh root@91.98.228.238 'cd ~/openpanel/self-hosting && docker compose stop op-api op-dashboard op-worker op-proxy'
+# Stop everything
+ssh root@91.98.228.238 'cd ~/openpanel/self-hosting && ./stop'
 
-# Reverse ClickHouse table renames
-ssh root@91.98.228.238 'docker exec self-hosting-op-ch-1 clickhouse-client --query "RENAME TABLE openpanel.events TO openpanel.events_v2_failed, openpanel.events_20251123 TO openpanel.events"'
-ssh root@91.98.228.238 'docker exec self-hosting-op-ch-1 clickhouse-client --query "RENAME TABLE openpanel.sessions TO openpanel.sessions_v2_failed, openpanel.sessions_20251123 TO openpanel.sessions"'
+# Restore both data volumes from the cold tars
+ssh root@91.98.228.238 'rm -rf /var/lib/docker/volumes/self-hosting_op-ch-data/_data && tar -C /var/lib/docker/volumes/self-hosting_op-ch-data -xzf /root/backup-ch-datadir.tar.gz'
+ssh root@91.98.228.238 'rm -rf /var/lib/docker/volumes/self-hosting_op-db-data/_data && tar -C /var/lib/docker/volumes/self-hosting_op-db-data -xzf /root/backup-pg-datadir.tar.gz'
 
-# Restore Postgres from backup (DB container still running)
-ssh root@91.98.228.238 'docker exec -i self-hosting-op-db-1 psql -U postgres postgres < /root/backup-pre-v2.sql'
-
-# Restore configs and restart with old images
-ssh root@91.98.228.238 'cd ~/openpanel/self-hosting && cp .env.backup-pre-v2 .env && cp docker-compose.yml.backup-pre-v2 docker-compose.yml'
-ssh root@91.98.228.238 'cd ~/openpanel/self-hosting && ./stop && ./start'
+# Restore configs and start the old stack
+ssh root@91.98.228.238 'cd ~/openpanel/self-hosting && cp .env.backup-pre-v2 .env && cp docker-compose.yml.backup-pre-v2 docker-compose.yml && ./start'
 ```
+
+Data loss on rollback = events ingested between the 4.3 tar and the rollback — none, since ingestion is down throughout the window.
 
 ## Sources & References
 
