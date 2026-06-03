@@ -498,13 +498,13 @@ ssh root@91.98.228.238 'docker exec self-hosting-op-db-1 psql -U postgres -c "\d
 
 ##### 5.3 Functional tests
 
-- [ ] Dashboard loads and shows existing project data
-- [ ] Events stream is visible in real-time view
-- [ ] Historical data (events, sessions) is intact and queryable
-- [ ] SDK event ingestion works (send test event from a client)
-- [ ] Org secret auth works (test with project ID + org secret)
-- [ ] Revenue tracking UI is available (new v2 feature)
-- [ ] Customizable dashboards work (new v2 feature)
+- [x] Dashboard loads and shows existing project data (user visual check 2026-06-03)
+- [x] Events stream is visible in real-time view (user visual check 2026-06-03)
+- [x] Historical data (events, sessions) is intact and queryable (4.9 gate + dashboard check)
+- [x] SDK event ingestion works (live multi-tenant traffic within seconds of 4.10)
+- [x] Org secret auth works — verified empirically: live `org:auth:puzzlr:<sha256>` cache key in Redis (new SHA-256 format proves the rebuilt v2 path serves production integrations)
+- [ ] Revenue tracking UI is available (new v2 feature) — not yet exercised
+- [x] Customizable dashboards work (user visual check 2026-06-03)
 
 ##### 5.4 Post-upgrade cleanup (after 7 days)
 
@@ -559,8 +559,8 @@ ssh root@91.98.228.238 'rm /root/backup-pre-v2.sql /root/backup-*.csv /root/back
 - [x] Dashboard loads at `https://activity.puzzlr.net` with v2 UI (Tanstack-based)
 - [x] All existing event data is intact and queryable (events exact: 36,789,649; sessions logically exact: 2,791,740)
 - [x] SDK event ingestion works with existing client credentials (live multi-tenant traffic verified post-upgrade)
-- [ ] Org secret auth works (project ID + org secret) — user-verified manually (needs plaintext secret)
-- [ ] Generate/regenerate org secret from organization settings UI — user-verified manually
+- [x] Org secret auth works (project ID + org secret) — verified empirically via live SHA-256 `org:auth` cache key in Redis (2026-06-03)
+- [ ] Generate/regenerate org secret from organization settings UI — untested; existing secret works, exercise on next rotation
 - [x] v2 features available: customizable dashboards + real-time view verified in browser 2026-06-03 (revenue/session replay UIs not yet exercised)
 - [x] ClickHouse running v25.10.2.65
 
