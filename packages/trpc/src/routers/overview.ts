@@ -626,6 +626,57 @@ export const overviewRouter = createTRPCRouter({
       return current;
     }),
 
+  // Fork-only: drill-down Events widget — distinct property keys for an event.
+  topEventPropertyKeys: overviewProcedure
+    .input(
+      z.object({
+        projectId: z.string(),
+        shareId: z.string().optional(),
+        eventName: z.string(),
+        filters: z.array(z.any()).default([]),
+        range: zRange,
+        startDate: z.string().nullish(),
+        endDate: z.string().nullish(),
+      }),
+    )
+    .use(cacher)
+    .query(async ({ input }) => {
+      const { timezone } = await getSettingsForProject(input.projectId);
+      const { current } = await getCurrentAndPrevious(
+        { ...input, timezone },
+        false,
+        timezone,
+      )(overviewService.getEventPropertyKeys.bind(overviewService));
+
+      return current;
+    }),
+
+  // Fork-only: drill-down Events widget — value distribution for event+property.
+  topEventPropertyValues: overviewProcedure
+    .input(
+      z.object({
+        projectId: z.string(),
+        shareId: z.string().optional(),
+        eventName: z.string(),
+        propertyKey: z.string(),
+        filters: z.array(z.any()).default([]),
+        range: zRange,
+        startDate: z.string().nullish(),
+        endDate: z.string().nullish(),
+      }),
+    )
+    .use(cacher)
+    .query(async ({ input }) => {
+      const { timezone } = await getSettingsForProject(input.projectId);
+      const { current } = await getCurrentAndPrevious(
+        { ...input, timezone },
+        false,
+        timezone,
+      )(overviewService.getEventPropertyValues.bind(overviewService));
+
+      return current;
+    }),
+
   // One-shot AI command bar — converts natural-language requests
   // ("show 7 aug to 11 aug", "from google", "mobile only for august
   // last year") into structured filter changes the dashboard can apply

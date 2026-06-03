@@ -1,4 +1,5 @@
 import OverviewRetention from '@/components/custom/overview-retention';
+import OverviewTopEventsProperties from '@/components/custom/overview-top-events-properties';
 import OverviewTopGames from '@/components/custom/overview-top-games';
 import {
   DEFAULT_WIDGETS,
@@ -49,7 +50,10 @@ const FORK_WIDGETS: OverviewWidgetDef[] = DEFAULT_WIDGETS
   // top-events, so Games + Events sit side by side and Devices pairs with Geo.
   .flatMap(w => {
     if (w.key === 'top-devices') return [TOP_GAMES];
-    if (w.key === 'top-events') return [w, TOP_DEVICES];
+    // Swap in the drill-down Events widget (event -> property keys -> values).
+    if (w.key === 'top-events') {
+      return [{ ...w, component: OverviewTopEventsProperties }, TOP_DEVICES];
+    }
     return [w];
   });
 

@@ -1924,6 +1924,93 @@ export class OverviewService {
     return query.execute();
   }
 
+  // Fork-only: distinct property keys carried by a single event (range-scoped),
+  // with how many in-range events carry each key. Level 2 of the drill-down
+  // Events widget (event -> property keys -> values). Internal `__*` keys are
+  // excluded to match the event-details properties view.
+  async getEventPropertyKeys({
+    projectId,
+    filters,
+    startDate,
+    endDate,
+    timezone,
+    eventName,
+  }: {
+    projectId: string;
+    filters: IChartEventFilter[];
+    startDate: string;
+    endDate: string;
+    timezone: string;
+    eventName: string;
+  }): Promise<Array<{ key: string; count: number }>> {
+    const where = this.getRawWhereClause('events', filters);
+
+    const query = clix(this.client, timezone)
+      .select<{ key: string; count: number }>([
+        "arrayJoin(arrayFilter(k -> NOT startsWith(k, '__'), mapKeys(properties))) as key",
+        'count() as count',
+      ])
+      .from(TABLE_NAMES.events, false)
+      .where('project_id', '=', projectId)
+      .where('name', '=', eventName)
+      .where('created_at', 'BETWEEN', [
+        clix.datetime(startDate, 'toDateTime'),
+        clix.datetime(endDate, 'toDateTime'),
+      ])
+      .rawWhere(where)
+      .groupBy(['key'])
+      .orderBy('count', 'DESC')
+      .limit(MAX_RECORDS_LIMIT);
+
+    return query.execute();
+  }
+
+  // Fork-only: value distribution (range-scoped) for one event + property key.
+  // Level 3 of the drill-down Events widget. This is the generic form of
+  // getTopLinkOut (which is just this for link_out / properties.href).
+  async getEventPropertyValues({
+    projectId,
+    filters,
+    startDate,
+    endDate,
+    timezone,
+    eventName,
+    propertyKey,
+  }: {
+    projectId: string;
+    filters: IChartEventFilter[];
+    startDate: string;
+    endDate: string;
+    timezone: string;
+    eventName: string;
+    propertyKey: string;
+  }): Promise<Array<{ value: string; count: number }>> {
+    const where = this.getRawWhereClause('events', filters);
+    // Escape the user-supplied key directly into the Map access — getSelectPropertyKey
+    // interpolates the key without escaping, so we build the accessor ourselves.
+    const valueExpr = `properties[${sqlstring.escape(propertyKey)}]`;
+
+    const query = clix(this.client, timezone)
+      .select<{ value: string; count: number }>([
+        `${valueExpr} as value`,
+        'count() as count',
+      ])
+      .from(TABLE_NAMES.events, false)
+      .where('project_id', '=', projectId)
+      .where('name', '=', eventName)
+      .where('created_at', 'BETWEEN', [
+        clix.datetime(startDate, 'toDateTime'),
+        clix.datetime(endDate, 'toDateTime'),
+      ])
+      .rawWhere(where)
+      .rawWhere(`${valueExpr} != ''`)
+      .groupBy(['value'])
+      .orderBy('count', 'DESC')
+      .limit(MAX_RECORDS_LIMIT);
+
+    return query.execute();
+  }
+
   async getMapData({
     projectId,
     filters,
