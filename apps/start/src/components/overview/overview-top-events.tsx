@@ -51,13 +51,6 @@ export default function OverviewTopEvents({
         type: 'conversions' as const,
       },
     },
-    link_out: {
-      title: 'Link out',
-      btn: 'Link out',
-      meta: {
-        type: 'linkOut' as const,
-      },
-    },
   });
 
   // Use different endpoints based on widget type
@@ -76,28 +69,7 @@ export default function OverviewTopEvents({
     }),
   );
 
-  const linkOutQuery = useQuery(
-    trpc.overview.topLinkOut.queryOptions({
-      projectId,
-      shareId,
-      range,
-      startDate,
-      endDate,
-      filters,
-    }),
-  );
-
   const tableData: EventTableItem[] = useMemo(() => {
-    // For link out, use href as name
-    if (widget.meta?.type === 'linkOut') {
-      if (!linkOutQuery.data) return [];
-      return linkOutQuery.data.map((item) => ({
-        id: item.href,
-        name: item.href,
-        count: item.count,
-      }));
-    }
-
     // For events and conversions
     if (!eventsQuery.data) return [];
 
@@ -119,13 +91,9 @@ export default function OverviewTopEvents({
       name: item.name,
       count: item.count,
     }));
-  }, [eventsQuery.data, linkOutQuery.data, widget.meta?.type, conversions]);
+  }, [eventsQuery.data, widget.meta?.type, conversions]);
 
-  // Determine which query's loading state to use
-  const isLoading =
-    widget.meta?.type === 'linkOut'
-      ? linkOutQuery.isLoading
-      : eventsQuery.isLoading;
+  const isLoading = eventsQuery.isLoading;
 
   const filteredData = useMemo(() => {
     if (!searchQuery.trim()) {
@@ -167,14 +135,10 @@ export default function OverviewTopEvents({
             <OverviewWidgetTableEvents
               data={filteredData}
               onItemClick={(name) => {
-                const filterName =
-                  widget.meta?.type === 'linkOut'
-                    ? 'properties.href'
-                    : 'name';
                 const f = eventQueryFiltersParser.serialize([
                   {
-                    id: filterName,
-                    name: filterName,
+                    id: 'name',
+                    name: 'name',
                     operator: 'is',
                     value: [name],
                   },
