@@ -13,6 +13,13 @@
  * "open in explorer" escape hatch in the breadcrumb preserves the old behavior
  * (dashboard only — not available in the public share context).
  *
+ * The header also carries a compact "All games" Combobox (right of the
+ * Events/Conversions tabs) that filters this card — and its drill-down — by a
+ * single game. The game list comes from overview.topGames; the chosen game is
+ * merged into the queries as a `properties.game_id` filter (widget-local React
+ * state, not the global overview filter). Requires 'properties.game_id' on
+ * WHITELISTED_FILTERS in overview.service.ts, otherwise the filter is dropped.
+ *
  * Fork-safe — see overview-top-events-properties.NOTES.md.
  */
 import {
@@ -24,11 +31,9 @@ import { useNumber } from '@/hooks/use-numer-formatter';
 import { useTRPC } from '@/integrations/trpc/react';
 import type { RouterOutputs } from '@/trpc/client';
 import { SerieIcon } from '@/components/report-chart/common/serie-icon';
+import { Combobox } from '@/components/ui/combobox';
 import { Widget, WidgetBody } from '@/components/widget';
-import {
-  WidgetFooter,
-  WidgetHeadSearchable,
-} from '@/components/overview/overview-widget';
+import { WidgetFooter } from '@/components/overview/overview-widget';
 import {
   type EventTableItem,
   OverviewWidgetTable,
@@ -39,11 +44,13 @@ import { useOverviewOptions } from '@/components/overview/useOverviewOptions';
 import { useOverviewWidgetV2 } from '@/components/overview/useOverviewWidget';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
+import { cn } from '@/utils/cn';
 import {
   BracesIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
   ExternalLinkIcon,
+  GamepadIcon,
 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 
@@ -55,6 +62,9 @@ type DrillView =
   | { level: 'events' }
   | { level: 'props'; event: EventTableItem }
   | { level: 'values'; event: EventTableItem; propertyKey: string };
+
+// Property filter that scopes this card (and its drill-down) to one game.
+const GAME_FILTER = 'properties.game_id';
 
 export default function OverviewTopEventsProperties({
   projectId,
@@ -70,6 +80,55 @@ export default function OverviewTopEventsProperties({
   const trpc = useTRPC();
   const [searchQuery, setSearchQuery] = useState('');
   const [view, setView] = useState<DrillView>({ level: 'events' });
+  const [game, setGame] = useState('');
+
+  // Global overview filters minus any game filter — the widget owns game
+  // scoping locally, so we always start from the un-gamed set.
+  const baseFilters = useMemo(
+    () => filters.filter((f) => f.name !== GAME_FILTER),
+    [filters],
+  );
+
+  // Games for the picker. Built from baseFilters so the list never collapses
+  // to the selected game (which would make it impossible to switch).
+  const gamesQuery = useQuery(
+    trpc.overview.topGames.queryOptions({
+      projectId,
+      shareId,
+      range,
+      startDate,
+      endDate,
+      filters: baseFilters,
+    }),
+  );
+
+  const gameItems = useMemo(
+    () => [
+      { value: '', label: 'All games' },
+      ...(gamesQuery.data ?? []).map((g) => ({
+        value: g.game_id,
+        label: g.game_id,
+      })),
+    ],
+    [gamesQuery.data],
+  );
+
+  // Scope this card (and its drill-down) to the selected game, if any.
+  const eventFilters = useMemo(
+    () =>
+      game
+        ? [
+            ...baseFilters,
+            {
+              id: GAME_FILTER,
+              name: GAME_FILTER,
+              operator: 'is' as const,
+              value: [game],
+            },
+          ]
+        : baseFilters,
+    [baseFilters, game],
+  );
 
   const { data: conversions } = useQuery(
     trpc.overview.topConversions.queryOptions({ projectId, shareId }),
@@ -96,7 +155,7 @@ export default function OverviewTopEventsProperties({
       range,
       startDate,
       endDate,
-      filters,
+      filters: eventFilters,
       excludeEvents:
         widget.meta?.type === 'events'
           ? ['session_start', 'session_end', 'screen_view']
@@ -114,7 +173,7 @@ export default function OverviewTopEventsProperties({
       range,
       startDate,
       endDate,
-      filters,
+      filters: eventFilters,
     }),
     enabled: !!drillEvent,
   });
@@ -128,7 +187,7 @@ export default function OverviewTopEventsProperties({
       range,
       startDate,
       endDate,
-      filters,
+      filters: eventFilters,
     }),
     enabled: view.level === 'values',
   });
@@ -170,15 +229,49 @@ export default function OverviewTopEventsProperties({
   return (
     <Widget className="col-span-6 md:col-span-3">
       {view.level === 'events' ? (
-        <WidgetHeadSearchable
-          tabs={tabs}
-          activeTab={widget.key}
-          onTabChange={setWidget}
-          searchValue={searchQuery}
-          onSearchChange={setSearchQuery}
-          searchPlaceholder={`Search ${widget.btn.toLowerCase()}`}
-          className="border-b-0 pb-2"
-        />
+        // Custom head matching WidgetHeadSearchable, plus a game picker on the
+        // right (WidgetHeadSearchable has no right-side slot for it).
+        <div className="border-border border-b pb-2">
+          <div className="row items-center justify-between gap-2 px-2 pt-2">
+            <div className="row min-w-0 gap-1 overflow-x-auto hide-scrollbar">
+              {tabs.map((tab) => (
+                <button
+                  key={tab.key}
+                  type="button"
+                  onClick={() => setWidget(tab.key)}
+                  className={cn(
+                    'shrink-0 rounded-md px-2 py-1.5 font-medium text-sm transition-colors',
+                    widget.key === tab.key
+                      ? 'text-foreground'
+                      : 'text-muted-foreground hover:bg-def-100 hover:text-foreground',
+                  )}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+            <Combobox
+              searchable
+              size="sm"
+              align="end"
+              icon={GamepadIcon}
+              placeholder="All games"
+              className="h-7 shrink-0 text-xs"
+              items={gameItems}
+              value={game || null}
+              onChange={setGame}
+            />
+          </div>
+          <div className="relative mt-2">
+            <input
+              type="search"
+              placeholder={`Search ${widget.btn.toLowerCase()}`}
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full border-y bg-transparent px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-foreground"
+            />
+          </div>
+        </div>
       ) : (
         <div className="row items-center gap-2 border-border border-b p-3">
           <button

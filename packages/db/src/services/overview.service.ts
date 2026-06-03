@@ -60,6 +60,10 @@ const WHITELISTED_FILTERS = [
   'utm_campaign',
   'utm_term',
   'utm_content',
+  // fork: allow overview widgets to be filtered by game. Property filters are
+  // otherwise dropped here; this routes properties.game_id through
+  // getEventFiltersWhereClause's properties.* path -> properties['game_id'].
+  'properties.game_id',
 ];
 
 // Columns that exist on the sessions table but not on events — on events
