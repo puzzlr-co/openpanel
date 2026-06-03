@@ -1845,6 +1845,48 @@ export class OverviewService {
     return query.execute();
   }
 
+  // Fork-only: per-game level funnel (started / completed) for the Top games
+  // widget. game_id lives on ~100% of level_started/level_completed events, so a
+  // single grouped scan with countIf gives both numbers. Aliases (quiz/quizr,
+  // etc.) are intentionally left as separate rows.
+  async getTopGames({
+    projectId,
+    filters,
+    startDate,
+    endDate,
+    timezone,
+  }: {
+    projectId: string;
+    filters: IChartEventFilter[];
+    startDate: string;
+    endDate: string;
+    timezone: string;
+  }): Promise<Array<{ game_id: string; started: number; completed: number }>> {
+    const where = this.getRawWhereClause('events', filters);
+    const gameKey = getSelectPropertyKey('properties.game_id');
+
+    const query = clix(this.client, timezone)
+      .select<{ game_id: string; started: number; completed: number }>([
+        `${gameKey} as game_id`,
+        "countIf(name = 'level_started') as started",
+        "countIf(name = 'level_completed') as completed",
+      ])
+      .from(TABLE_NAMES.events, false)
+      .where('project_id', '=', projectId)
+      .where('name', 'IN', ['level_started', 'level_completed'])
+      .where('created_at', 'BETWEEN', [
+        clix.datetime(startDate, 'toDateTime'),
+        clix.datetime(endDate, 'toDateTime'),
+      ])
+      .rawWhere(where)
+      .rawWhere(`${gameKey} IS NOT NULL AND ${gameKey} != ''`)
+      .groupBy(['game_id'])
+      .orderBy('started', 'DESC')
+      .limit(MAX_RECORDS_LIMIT);
+
+    return query.execute();
+  }
+
   async getTopLinkOut({
     projectId,
     filters,

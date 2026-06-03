@@ -1,4 +1,5 @@
 import OverviewRetention from '@/components/custom/overview-retention';
+import OverviewTopGames from '@/components/custom/overview-top-games';
 import {
   DEFAULT_WIDGETS,
   type OverviewWidgetDef,
@@ -19,6 +20,18 @@ const RETENTION: OverviewWidgetDef = {
   lazyViewport: true,
 };
 
+// Top games (levels started / completed / play-through rate). Takes the
+// top-devices slot so it sits side by side with Top events (see reordering
+// below); top-devices moves down to pair with Top geo.
+const TOP_GAMES: OverviewWidgetDef = {
+  key: 'top-games',
+  component: OverviewTopGames,
+  contexts: ['dashboard', 'share'],
+};
+
+// The unmodified top-devices def, re-inserted after top-events.
+const TOP_DEVICES = DEFAULT_WIDGETS.find(w => w.key === 'top-devices')!;
+
 // Widgets removed from the overview entirely:
 // - insights (upstream dashboard-only widget)
 // - top-sources (Refs/Urls/Types/Source/Medium/Campaign/Term/Content)
@@ -31,7 +44,14 @@ const FORK_WIDGETS: OverviewWidgetDef[] = DEFAULT_WIDGETS
     : w)
   .filter(w => !REMOVED_WIDGET_KEYS.includes(w.key))
   // insert the retention section right after the metrics widget
-  .flatMap(w => w.key === 'metrics' ? [w, RETENTION] : [w]);
+  .flatMap(w => w.key === 'metrics' ? [w, RETENTION] : [w])
+  // Swap Top games into the top-devices slot and move top-devices after
+  // top-events, so Games + Events sit side by side and Devices pairs with Geo.
+  .flatMap(w => {
+    if (w.key === 'top-devices') return [TOP_GAMES];
+    if (w.key === 'top-events') return [w, TOP_DEVICES];
+    return [w];
+  });
 
 export function getWidgets(context: 'dashboard' | 'share'): OverviewWidgetDef[] {
   return FORK_WIDGETS.filter(w => w.contexts.includes(context));

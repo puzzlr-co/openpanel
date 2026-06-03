@@ -603,6 +603,29 @@ export const overviewRouter = createTRPCRouter({
       return current;
     }),
 
+  // Fork-only: Top games widget (level started / completed per game_id).
+  // Reuses zGetTopLinkOutInput since the service signature is identical.
+  topGames: overviewProcedure
+    .input(
+      zGetTopLinkOutInput.omit({ startDate: true, endDate: true }).extend({
+        startDate: z.string().nullish(),
+        endDate: z.string().nullish(),
+        range: zRange,
+        shareId: z.string().optional(),
+      }),
+    )
+    .use(cacher)
+    .query(async ({ input }) => {
+      const { timezone } = await getSettingsForProject(input.projectId);
+      const { current } = await getCurrentAndPrevious(
+        { ...input, timezone },
+        false,
+        timezone,
+      )(overviewService.getTopGames.bind(overviewService));
+
+      return current;
+    }),
+
   // One-shot AI command bar — converts natural-language requests
   // ("show 7 aug to 11 aug", "from google", "mobile only for august
   // last year") into structured filter changes the dashboard can apply
