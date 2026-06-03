@@ -469,7 +469,7 @@ ssh root@91.98.228.238 'cd ~/openpanel/self-hosting && docker compose logs -f op
 
 #### Phase 5: Verification
 
-**Completed 2026-06-03 (~18:20 UTC).** All technical gates passed: 10/10 containers healthy on v2 images, API healthcheck `ready:true`, dashboard 307→/login→200, events ≥ baseline with live ingestion (max ts seconds old), MVs confirmed following renamed tables (dau_mv inner parts written seconds after fresh events — residual risk closed), v1 queue backlog (~1k jobs) fully processed by v2 workers, zero auth failures across all tenants. Dashboard visual check + org secret auth test performed manually by the user (5.3 checklist). §5.4 cleanup deferred to 2026-06-10 per plan; backup tables `events_20251123`/`sessions_20251123` and `/root/backup-*`, `/root/baseline-*` remain until then.
+**Completed 2026-06-03 (~18:20 UTC).** All technical gates passed: 10/10 containers healthy on v2 images, API healthcheck `ready:true`, dashboard 307→/login→200, events ≥ baseline with live ingestion (max ts seconds old), MVs confirmed following renamed tables (dau_mv inner parts written seconds after fresh events — residual risk closed), v1 queue backlog (~1k jobs) fully processed by v2 workers, zero auth failures across all tenants. Dashboard visually verified via browser automation 2026-06-03 ~18:45 UTC: v2 TanStack UI, all 8 tenant projects with live data, custom fork widgets rendering (level completion, multi-game sessions, top games, retention curve, events-with-game-filter), realtime view live (489 visitors/30min, map + feed), events stream flowing with geo enrichment, dashboards feature present, zero console errors. Org secret auth test remains manual (needs plaintext secret). §5.4 cleanup deferred to 2026-06-10 per plan; backup tables `events_20251123`/`sessions_20251123` and `/root/backup-*`, `/root/baseline-*` remain until then.
 
 ##### 5.1 Service health
 
@@ -561,7 +561,7 @@ ssh root@91.98.228.238 'rm /root/backup-pre-v2.sql /root/backup-*.csv /root/back
 - [x] SDK event ingestion works with existing client credentials (live multi-tenant traffic verified post-upgrade)
 - [ ] Org secret auth works (project ID + org secret) — user-verified manually (needs plaintext secret)
 - [ ] Generate/regenerate org secret from organization settings UI — user-verified manually
-- [ ] v2 features available: revenue tracking, session replay, customizable dashboards, real-time view — user visual check
+- [x] v2 features available: customizable dashboards + real-time view verified in browser 2026-06-03 (revenue/session replay UIs not yet exercised)
 - [x] ClickHouse running v25.10.2.65
 
 ### Non-Functional Requirements
