@@ -20,7 +20,11 @@
  * state, not the global overview filter). Requires 'properties.game_id' on
  * WHITELISTED_FILTERS in overview.service.ts, otherwise the filter is dropped.
  *
- * Fork-safe — see overview-top-events-properties.NOTES.md.
+ * Drill-down was chosen (2026-06-03) over inline-expand and popover-peek
+ * variants — it reuses the real overview table so it reads as native, and maps
+ * 1:1 to the data model (event -> property key -> values). Fork-safe: upstream
+ * overview/overview-top-events.tsx is untouched; this file is swapped into the
+ * top-events slot in config/overview-widgets.fork.ts.
  */
 import {
   eventQueryFiltersParser,

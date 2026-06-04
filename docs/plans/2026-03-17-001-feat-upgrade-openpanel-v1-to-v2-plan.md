@@ -1,9 +1,9 @@
 ---
 title: "feat: Upgrade Self-Hosted OpenPanel v1 to v2"
 type: feat
-status: active
+status: complete
 date: 2026-03-17
-origin: docs/brainstorms/2026-03-17-upgrade-to-v2-brainstorm.md
+origin: docs/brainstorms/2026-03-17-upgrade-to-v2-brainstorm.md (removed 2026-06-04 after completion; decisions absorbed into this plan)
 ---
 
 # Upgrade Self-Hosted OpenPanel v1 to v2
@@ -18,7 +18,7 @@ Upgrade the production self-hosted OpenPanel instance (`activity.puzzlr.net`) fr
 
 The fork is 255 commits behind upstream. v2 brings a redesigned Tanstack dashboard, revenue tracking, session replay, customizable Grafana-style dashboards, Google Search Console integration, and significant bug fixes. Staying on v1 means missing these features and accumulating drift that makes future upgrades harder.
 
-(see brainstorm: docs/brainstorms/2026-03-17-upgrade-to-v2-brainstorm.md — Strategy: Fresh Start + Rebuild)
+Strategy chosen in the (since-removed) brainstorm: **Fresh Start + Rebuild** — start from `upstream/main` and rebuild the org secret feature, rather than merging 255 upstream commits into the fork or running official images (which can't carry the custom org secret auth).
 
 ## Technical Approach
 
@@ -86,7 +86,7 @@ model Organization {
 
 `apps/api/src/utils/auth.ts` — add org secret fallback after client secret verification.
 
-**3 improvements over v1 implementation** (see brainstorm: docs/brainstorms/2026-03-17-upgrade-to-v2-brainstorm.md — Key Decision #3):
+**3 improvements over v1 implementation:**
 
 **Improvement 1: SHA-256 cache keys** (security fix)
 
@@ -548,9 +548,9 @@ ssh root@91.98.228.238 'rm /root/backup-pre-v2.sql /root/backup-*.csv /root/back
 
 ## Alternative Approaches Considered
 
-1. **Merge upstream into fork** — Rejected. 255 upstream commits would create extensive merge conflicts in schema.prisma, auth.ts, dashboard components. (see brainstorm)
-2. **Use official Docker images** — Rejected. Can't include org secret feature without custom code. (see brainstorm)
-3. **Cherry-pick org secret as-is** — Rejected. Opportunity to fix cache key security issue and add missing cache invalidation. (see brainstorm — Key Decision #3)
+1. **Merge upstream into fork** — Rejected. 255 upstream commits would create extensive merge conflicts in schema.prisma, auth.ts, dashboard components.
+2. **Use official Docker images** — Rejected. Can't include org secret feature without custom code.
+3. **Cherry-pick org secret as-is** — Rejected. Opportunity to fix cache key security issue and add missing cache invalidation.
 
 ## Acceptance Criteria
 
@@ -629,7 +629,7 @@ Data loss on rollback = events ingested between the 4.3 tar and the rollback —
 
 ### Origin
 
-- **Brainstorm document:** [docs/brainstorms/2026-03-17-upgrade-to-v2-brainstorm.md](docs/brainstorms/2026-03-17-upgrade-to-v2-brainstorm.md)
+- **Brainstorm document:** `docs/brainstorms/2026-03-17-upgrade-to-v2-brainstorm.md` (removed 2026-06-04 after completion)
   - Key decisions carried forward: fresh start strategy, rebuild org secret with improvements, keep custom Docker images, full backup approach
 
 ### Internal References

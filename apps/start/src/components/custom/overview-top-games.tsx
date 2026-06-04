@@ -3,9 +3,12 @@
  * and the play-through rate (completed / started). Built to match the Top events
  * widget: searchable head, the shared overview table, plain numbers, no extra
  * styling. game_id is the grouping key (present on ~100% of level events);
- * aliases like quiz/quizr stay as separate rows on purpose.
+ * aliases like quiz/quizr stay as separate rows on purpose (merging is a
+ * manual data decision, not a display concern). Low rates can be real: quiz
+ * fires level_completed only on a perfect run (fail-state game), so its ~6%
+ * is honest and not comparable to puzzle games.
  *
- * Data: overview.topGames. Fork-safe — see overview-top-games.NOTES.md.
+ * Data: overview.topGames. Fork-safe (fork-only file, appended endpoints).
  */
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
