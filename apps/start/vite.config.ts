@@ -30,7 +30,20 @@ if (process.env.NITRO) {
 const config = defineConfig({
   plugins,
   ssr: {
-    noExternal: ['react-syntax-highlighter', 'lowlight', 'highlight.js'],
+    // @visx/responsive deep-imports 'lodash/debounce' (extensionless),
+    // @nivo/* deep-imports lodash files, and number-flow's 'esm-env' dep is
+    // missed by nitro's dependency tracer — all break Node ESM resolution on
+    // share-page SSR (ERR_MODULE_NOT_FOUND) — bundle them instead.
+    noExternal: [
+      'react-syntax-highlighter',
+      'lowlight',
+      'highlight.js',
+      /@nivo\//,
+      /@visx\//,
+      'lodash',
+      /number-flow/,
+      'esm-env',
+    ],
   },
 });
 

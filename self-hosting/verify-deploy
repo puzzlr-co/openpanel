@@ -1,0 +1,199 @@
+#!/bin/bash
+# Post-deploy verification + babysitting for the OpenPanel stack.
+#
+# Runs ON the VPS from this directory (reaches it via git pull, like ./update).
+#
+#   ./verify-deploy              # one-shot verification (run right after ./update)
+#   ./verify-deploy --watch 15   # babysit: re-check every 60s for 15 minutes
+#
+# Exit code 0 = all checks passed. Non-zero = at least one check failed.
+# Design rule: failure to COLLECT a signal is a check failure, never a pass.
+
+set -u
+cd "$(dirname "$0")"
+
+DOMAIN="${OP_DOMAIN:-activity.puzzlr.net}"
+SHARE_ID="${OP_SHARE_ID:-7x9QJy}"          # a known public share page (SSR canary)
+EXPECTED_CONTAINERS="${OP_EXPECTED_CONTAINERS:-10}"
+FRESHNESS_MAX_SECONDS="${OP_FRESHNESS_MAX_SECONDS:-300}"
+ERROR_LOG_WINDOW="${OP_ERROR_LOG_WINDOW:-10m}"
+
+PASS=0
+FAIL=0
+
+ok()   { PASS=$((PASS + 1)); echo "  ✔ $1"; }
+bad()  { FAIL=$((FAIL + 1)); echo "  ✘ $1"; }
+
+check_containers() {
+  # NB: stderr is dropped on purpose — compose emits warnings (e.g. obsolete
+  # `version` attribute) on stderr that would pollute the listing.
+  local listing
+  if ! listing=$(docker compose ps --format '{{.Name}} {{.State}} {{.Health}}' 2>/dev/null); then
+    bad "docker compose ps failed"
+    return
+  fi
+  local count
+  count=$(printf '%s' "$listing" | grep -c . || true)
+  if [ "$count" -lt "$EXPECTED_CONTAINERS" ]; then
+    bad "only $count/$EXPECTED_CONTAINERS containers present"
+    return
+  fi
+  local bad_states
+  bad_states=$(printf '%s\n' "$listing" | awk '$2 != "running" || ($3 != "" && $3 != "healthy") {print}')
+  if [ -n "$bad_states" ]; then
+    bad "containers not running/healthy:"$'\n'"$bad_states"
+  else
+    ok "all $count containers running & healthy"
+  fi
+}
+
+check_api_health() {
+  local body
+  if body=$(curl -fsS --max-time 10 "https://$DOMAIN/api/healthcheck" 2>&1); then
+    ok "API healthcheck OK ($body)"
+  else
+    bad "API healthcheck failed: $body"
+  fi
+}
+
+check_root_http() {
+  local code
+  code=$(curl -s -o /dev/null --max-time 10 -w '%{http_code}' "https://$DOMAIN")
+  case "$code" in
+    200|307) ok "root page HTTP $code" ;;
+    *) bad "root page HTTP $code (expected 200/307)" ;;
+  esac
+}
+
+check_share_ssr() {
+  # SSR module-resolution failures still return HTTP 200 with a loading shell,
+  # so an HTTP check is not enough: request the page, then look for fresh
+  # ERR_MODULE_NOT_FOUND in the dashboard logs.
+  local code
+  code=$(curl -s -o /dev/null --max-time 15 -w '%{http_code}' "https://$DOMAIN/share/overview/$SHARE_ID")
+  sleep 2
+  local logs
+  if ! logs=$(docker compose logs --since 1m op-dashboard 2>/dev/null); then
+    bad "share SSR check: could not read op-dashboard logs"
+    return
+  fi
+  local errors
+  errors=$(printf '%s' "$logs" | grep -c 'ERR_MODULE_NOT_FOUND' || true)
+  if [ "$code" = "200" ] && [ "$errors" -eq 0 ]; then
+    ok "share page /share/overview/$SHARE_ID SSR clean (HTTP 200, no module errors)"
+  else
+    bad "share page SSR: HTTP $code, $errors ERR_MODULE_NOT_FOUND in last 1m of op-dashboard logs"
+  fi
+}
+
+check_event_freshness() {
+  local age
+  age=$(docker compose exec -T op-ch clickhouse-client --query \
+    "SELECT dateDiff('second', max(created_at), now()) FROM openpanel.events" 2>/dev/null)
+  if [ "$age" -lt "$FRESHNESS_MAX_SECONDS" ] 2>/dev/null; then
+    ok "event ingestion live (newest event ${age}s old)"
+  else
+    bad "event ingestion stale or query failed (newest event: ${age}s, max ${FRESHNESS_MAX_SECONDS}s)"
+  fi
+}
+
+# Restart counts are cumulative since container creation (op-ch carries
+# historical OOM restarts), so the meaningful signal is the DELTA since this
+# script started — not absolute zero.
+RESTART_BASELINE=""
+
+snapshot_restarts() {
+  local ids
+  ids=$(docker compose ps -q 2>/dev/null)
+  [ -n "$ids" ] && echo "$ids" | xargs docker inspect --format '{{.RestartCount}} {{.Name}}' 2>/dev/null
+}
+
+check_restarts() {
+  local current
+  current=$(snapshot_restarts)
+  if [ -z "$current" ]; then
+    bad "restart check: no containers found"
+    return
+  fi
+  if [ -z "$RESTART_BASELINE" ]; then
+    RESTART_BASELINE=$current
+    ok "restart baseline captured:"$'\n'"$(printf '%s\n' "$current" | awk '$1 > 0' | sed 's/^/      /')"
+    return
+  fi
+  local delta
+  delta=$(diff <(printf '%s\n' "$RESTART_BASELINE") <(printf '%s\n' "$current") | grep '^>' || true)
+  if [ -n "$delta" ]; then
+    bad "containers restarted since baseline:"$'\n'"$delta"
+  else
+    ok "no container restarts since baseline"
+  fi
+}
+
+check_error_logs() {
+  local logs
+  if ! logs=$(docker compose logs --since "$ERROR_LOG_WINDOW" op-api op-worker op-dashboard 2>/dev/null); then
+    bad "error-log check: could not read logs"
+    return
+  fi
+  local errors
+  errors=$(printf '%s' "$logs" \
+    | grep -iE '\b(error|fatal|exception)\b' \
+    | grep -vE 'tried to stream query' || true)
+  local count
+  count=$(printf '%s' "$errors" | grep -c . || true)
+  if [ "$count" -eq 0 ]; then
+    ok "no errors in op-api/op-worker/op-dashboard logs (last $ERROR_LOG_WINDOW)"
+  else
+    bad "$count error lines in logs (last $ERROR_LOG_WINDOW); first 5:"$'\n'"$(printf '%s\n' "$errors" | head -5)"
+  fi
+}
+
+show_digests() {
+  echo "  running images:"
+  docker compose ps --format '{{.Name}} {{.Image}}' 2>/dev/null \
+    | grep -E 'op-(api|dashboard|worker)' | sort -u | sed 's/^/    /'
+  for img in api dashboard worker; do
+    docker inspect --format "    keiwanmosaddegh/openpanel-$img → {{index .RepoDigests 0}}" \
+      "$(docker compose ps --format '{{.Image}}' 2>/dev/null | grep "openpanel-$img" | head -1)" 2>/dev/null
+  done
+}
+
+run_checks() {
+  PASS=0
+  FAIL=0
+  echo "── verify-deploy @ $(date -u '+%Y-%m-%d %H:%M:%S UTC') ──"
+  check_containers
+  check_api_health
+  check_root_http
+  check_share_ssr
+  check_event_freshness
+  check_restarts
+  check_error_logs
+  echo "── $PASS passed, $FAIL failed ──"
+}
+
+run_checks
+show_digests
+
+OVERALL_FAIL=$FAIL
+
+if [ "${1:-}" = "--watch" ]; then
+  MINUTES="${2:-15}"
+  echo
+  echo "Babysitting for $MINUTES minutes (1 check round per minute)..."
+  for i in $(seq 1 "$MINUTES"); do
+    sleep 60
+    echo
+    echo "[round $i/$MINUTES]"
+    run_checks
+    OVERALL_FAIL=$((OVERALL_FAIL + FAIL))
+  done
+  echo
+  if [ "$OVERALL_FAIL" -eq 0 ]; then
+    echo "BABYSIT RESULT: all rounds clean ✔"
+  else
+    echo "BABYSIT RESULT: $OVERALL_FAIL failed checks across all rounds ✘"
+  fi
+fi
+
+exit $((OVERALL_FAIL > 0 ? 1 : 0))
