@@ -149,13 +149,9 @@ check_error_logs() {
 }
 
 show_digests() {
-  echo "  running images:"
-  docker compose ps --format '{{.Name}} {{.Image}}' 2>/dev/null \
-    | grep -E 'op-(api|dashboard|worker)' | sort -u | sed 's/^/    /'
-  for img in api dashboard worker; do
-    docker inspect --format "    keiwanmosaddegh/openpanel-$img → {{index .RepoDigests 0}}" \
-      "$(docker compose ps --format '{{.Image}}' 2>/dev/null | grep "openpanel-$img" | head -1)" 2>/dev/null
-  done
+  echo "  running image digests:"
+  docker compose ps --format '{{.Image}}' 2>/dev/null | grep 'openpanel-' | sort -u \
+    | xargs -r docker inspect --format '    {{index .RepoDigests 0}}' 2>/dev/null
 }
 
 run_checks() {
