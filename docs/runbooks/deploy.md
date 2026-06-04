@@ -66,9 +66,14 @@ ssh root@91.98.228.238 'docker exec self-hosting-op-db-1 pg_dump -U postgres pos
   healthcheck has `start_period: 600s` to absorb them; caddy waits for api+dashboard
   health before routing, limiting the blast radius of a failed migration.
 
-**Downtime expectation:** brief per-service blip while containers recreate
-(measured 2026-06-04: see §7 notes). For riskier releases prefer the low-traffic
-window 02:00–04:00 CET.
+**Downtime expectation: ~30 seconds of full outage** (measured 2026-06-04, v2.0.1:
+1×502 then ~30 s connection-refused, recovered at 32 s). The window is NOT
+per-service: compose recreates `op-proxy` (caddy) as a dependent of api/dashboard,
+and caddy's `depends_on: service_healthy` keeps it down until both backends pass
+their healthchecks. SDK events sent during the window are lost at the HTTP layer
+(client-side retry only), so for riskier releases prefer the low-traffic window
+02:00–04:00 CET. db/kv/ch are not recreated on a code release (image unchanged) —
+they only gate startup ordering.
 
 **If step 1 was skipped / no new digest:** `./update` degrades to a no-op pull +
 no-op recreate (safe).
@@ -126,6 +131,8 @@ ssh root@91.98.228.238 'cd ~/openpanel/self-hosting && sed -i "s|\(keiwanmosadde
 - Rollback only covers code. If the bad release ran a schema migration, restore the §2
   `pg_dump` (and treat ClickHouse migrations per §6).
 - Verify the rollback with §3.
+- *Not live-tested* (deliberate call, 2026-06-04: the mechanism is the same compose-recreate
+  machinery validated in the forward direction; expect the same ~30 s outage).
 
 ## 6. Exception path: heavy ClickHouse migrations
 
@@ -153,6 +160,22 @@ See the June 3 execution in `docs/plans/2026-03-17-001-feat-upgrade-openpanel-v1
 | 8 | Worker containers (`op-worker` ×4 replicas) recreate in parallel with api/dashboard; queued events buffer in Redis during the blip, so brief worker downtime loses nothing. |
 | 9 | The error-log check needs operator judgment. Known noise (as of 2026-06-04): `overview.userJourney` ClickHouse "Query memory limit exceeded" rejections — that's the 6 GB/query cap working as designed (the alternative was CH getting OOM-killed; op-ch carries 9 historical OOM restarts from before the caps). Goes away when the userJourney query is fixed. |
 | 10 | `RestartCount` is cumulative since container creation — verify-deploy uses delta-since-baseline semantics, not absolute zero. |
+| 11 | **Container recreation wipes log history.** `docker compose logs --since 10m` after a deploy only sees the new containers' logs — pre-deploy error lines are gone, so a clean error-log check right after deploy says nothing about the old release. Conversely it makes the post-deploy signal pure. |
+
+## Validation record (2026-06-04 dry-run, v2.0.0 → v2.0.1)
+
+Probed failure angles, all confirmed safe:
+
+- VPS `git pull` is non-interactive: public fork over HTTPS, fast-forward only. ✔
+- `--pull always` re-resolved the moving `:2` tag: all three running `RepoDigests` matched
+  the freshly pushed Docker Hub digests exactly. ✔
+- Recreate scope: only op-api/op-dashboard/op-worker×4/op-proxy recreated; db/kv/ch untouched. ✔
+- Downtime: 32 s total (see §2). ✔
+- No-op deploy (no new digest): `./update` degrades to pull-nothing + recreate-nothing. ✔ (by design;
+  observed pre-deploy that an unchanged digest produced no recreate)
+- verify-deploy canary sensitivity proven: pre-deploy run failed exactly on the live SSR bug
+  (2×ERR_MODULE_NOT_FOUND), post-deploy run 7/7 clean with the same checks. ✔
+- Share page before/after: SSR shell-only 135 KB → fully server-rendered 190 KB. ✔
 
 ## Quick reference (happy path)
 
