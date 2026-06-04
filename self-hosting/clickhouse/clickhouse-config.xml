@@ -5,7 +5,12 @@
     </logger>
     
     <keep_alive_timeout>10</keep_alive_timeout>
-    
+
+    <!-- Cap ClickHouse's total memory below host RAM so it self-limits
+         (MEMORY_LIMIT_EXCEEDED) before the kernel OOM killer kills it.
+         Default ratio is 0.9, which on a shared host leaves no headroom. -->
+    <max_server_memory_usage_to_ram_ratio>0.7</max_server_memory_usage_to_ram_ratio>
+
     <!-- Stop all the unnecessary logging -->
     <query_thread_log remove="remove"/>
     <query_log remove="remove"/>
