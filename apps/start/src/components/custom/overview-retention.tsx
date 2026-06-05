@@ -51,6 +51,13 @@ const TENURE = [
 // theme tweak is a single edit.
 const COHORT_GREEN = '#16a34a';
 
+// Shared axis geometry for both charts. 52px axis minus the -8 left margin
+// leaves 44px of label room — enough for the widest ticks ("100%" ≈ 32px,
+// "8000" ≈ 30px). Anything tighter clips leading digits (44/-16 rendered
+// "100%"/"75%"/"50%"/"25%" as "0%"/"5%"/"0%"/"5%").
+const CHART_MARGIN = { top: 8, right: 12, bottom: 0, left: -8 } as const;
+const Y_AXIS_WIDTH = 52;
+
 // --- Honesty / stability guards -------------------------------------------
 
 // Drop cohorts whose week-0 (first-7-days) denominator is below this. ~100 is the
@@ -77,8 +84,18 @@ const PREFERRED_TARGET_WEEK = 4;
 // 2-point line.
 const MIN_COHORTS_FOR_TREND = 3;
 
-const dirOf = (diff: number | null): 'up' | 'down' | 'flat' =>
-  diff == null ? 'flat' : diff > TREND_EPS ? 'up' : diff < -TREND_EPS ? 'down' : 'flat';
+function dirOf(diff: number | null): 'up' | 'down' | 'flat' {
+  if (diff == null) {
+    return 'flat';
+  }
+  if (diff > TREND_EPS) {
+    return 'up';
+  }
+  if (diff < -TREND_EPS) {
+    return 'down';
+  }
+  return 'flat';
+}
 
 // ---------------------------------------------------------------------------
 // Atoms
@@ -94,12 +111,14 @@ function FloorNote({ className }: { className?: string }) {
   );
 }
 
+const TREND_VERDICT = {
+  up: { cls: 'bg-emerald-500/10 text-emerald-600', icon: '↗', word: 'Improving' },
+  down: { cls: 'bg-red-500/10 text-red-600', icon: '↘', word: 'Slipping' },
+  flat: { cls: 'bg-muted text-muted-foreground', icon: '→', word: 'Steady' },
+} as const;
+
 function TrendVerdict({ direction }: { direction: 'up' | 'down' | 'flat' }) {
-  const map = {
-    up: { cls: 'bg-emerald-500/10 text-emerald-600', icon: '↗', word: 'Improving' },
-    down: { cls: 'bg-red-500/10 text-red-600', icon: '↘', word: 'Slipping' },
-    flat: { cls: 'bg-muted text-muted-foreground', icon: '→', word: 'Steady' },
-  }[direction];
+  const map = TREND_VERDICT[direction];
   return (
     <div
       className={cn(
@@ -113,9 +132,20 @@ function TrendVerdict({ direction }: { direction: 'up' | 'down' | 'flat' }) {
   );
 }
 
-function ChartState({ children }: { children: React.ReactNode }) {
+function ChartState({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
   return (
-    <div className="flex h-56 items-center justify-center rounded-lg bg-muted/30 px-6 text-center text-sm text-muted-foreground">
+    <div
+      className={cn(
+        'flex h-56 items-center justify-center rounded-lg bg-muted/30 px-6 text-center text-sm text-muted-foreground',
+        className,
+      )}
+    >
       {children}
     </div>
   );
@@ -139,8 +169,12 @@ type Cohort = {
 function pivotCohorts(rows: CohortRow[]): Cohort[] {
   const map = new Map<string, Map<number, number>>();
   for (const r of rows) {
-    if (!map.has(r.cohort_week)) map.set(r.cohort_week, new Map());
-    map.get(r.cohort_week)!.set(r.life_week, r.sessions);
+    let lifeMap = map.get(r.cohort_week);
+    if (!lifeMap) {
+      lifeMap = new Map();
+      map.set(r.cohort_week, lifeMap);
+    }
+    lifeMap.set(r.life_week, r.sessions);
   }
   return [...map.entries()]
     .map(([week, lifeMap]) => ({
@@ -152,14 +186,14 @@ function pivotCohorts(rows: CohortRow[]): Cohort[] {
     .sort((a, b) => a.week.localeCompare(b.week));
 }
 
-const retentionAt = (c: Cohort, L: number): number | null => {
+function retentionAt(c: Cohort, L: number): number | null {
   const s = c.lifeMap.get(L);
   if (s == null || !c.size) return null;
   // Cap at 100%: this is a retention floor, so a survivors-more-active blip
   // shouldn't render as a >100% spike. With full-history denominators this is a
   // safety net, not the common case.
   return Math.min(100, (s / c.size) * 100);
-};
+}
 
 // Prefer the fixed checkpoint week; step down only when too few cohorts have
 // aged that far. Deterministic given the data → no silent drift.
@@ -219,7 +253,10 @@ const { TooltipProvider: TenureTooltipProvider, Tooltip: TenureTooltip } =
 function TenureRiver({ rows, loading }: { rows: TenureRow[]; loading: boolean }) {
   const { interval } = useOverviewOptions();
   const formatDate = useFormatDateInterval({ interval, short: false });
-  const data = rows.map((r) => ({ ...r, label: r.date.slice(5, 10) }));
+  const data = useMemo(
+    () => rows.map((r) => ({ ...r, label: r.date.slice(5, 10) })),
+    [rows],
+  );
   return (
     <Widget className="col-span-6">
       <WidgetHead>
@@ -236,17 +273,14 @@ function TenureRiver({ rows, loading }: { rows: TenureRow[]; loading: boolean })
         </p>
 
         {loading ? (
-          <ChartState>Loading…</ChartState>
+          <ChartState className="h-64">Loading…</ChartState>
         ) : data.length === 0 ? (
-          <ChartState>No sessions in this date range.</ChartState>
+          <ChartState className="h-64">No sessions in this date range.</ChartState>
         ) : (
           <div className="h-64 w-full">
             <TenureTooltipProvider formatDate={formatDate}>
               <ResponsiveContainer>
-              <ComposedChart
-                data={data}
-                margin={{ top: 8, right: 12, bottom: 0, left: -8 }}
-              >
+              <ComposedChart data={data} margin={CHART_MARGIN}>
                 <CartesianGrid
                   strokeDasharray="3 3"
                   vertical={false}
@@ -264,7 +298,7 @@ function TenureRiver({ rows, loading }: { rows: TenureRow[]; loading: boolean })
                   tickLine={false}
                   axisLine={false}
                   fontSize={12}
-                  width={52}
+                  width={Y_AXIS_WIDTH}
                   className="text-muted-foreground"
                 />
                 <TenureTooltip cursor={{ stroke: 'var(--border)' }} />
@@ -384,10 +418,7 @@ function CohortQuality({
         <div className="mt-3 h-56 w-full">
           <CohortTooltipProvider target={target}>
             <ResponsiveContainer>
-            <ComposedChart
-              data={data}
-              margin={{ top: 8, right: 12, bottom: 0, left: -16 }}
-            >
+            <ComposedChart data={data} margin={CHART_MARGIN}>
               <defs>
                 <linearGradient id="cqFill" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor={COHORT_GREEN} stopOpacity={0.3} />
@@ -412,7 +443,7 @@ function CohortQuality({
                 tickLine={false}
                 axisLine={false}
                 fontSize={12}
-                width={44}
+                width={Y_AXIS_WIDTH}
                 className="text-muted-foreground"
               />
               <CohortTooltip cursor={{ stroke: 'var(--border)' }} />
@@ -473,16 +504,13 @@ export default function OverviewRetention({
   const cohort = useQuery(trpc.overview.cohortRetention.queryOptions(queryInput));
 
   const cohorts = useMemo(
-    () => pivotCohorts((cohort.data as CohortRow[]) ?? []),
+    () => pivotCohorts(cohort.data ?? []),
     [cohort.data],
   );
 
   return (
     <div className="col-span-6 flex flex-col gap-4">
-      <TenureRiver
-        rows={(tenure.data as TenureRow[]) ?? []}
-        loading={tenure.isLoading}
-      />
+      <TenureRiver rows={tenure.data ?? []} loading={tenure.isLoading} />
       <CohortQuality cohorts={cohorts} loading={cohort.isLoading} />
     </div>
   );
