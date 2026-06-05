@@ -6,6 +6,11 @@
 #   ./verify-deploy              # one-shot verification (run right after ./update)
 #   ./verify-deploy --watch 15   # babysit: re-check every 60s for 15 minutes
 #
+#   OP_EXPECTED_REVISION=<full git sha> ./verify-deploy
+#       also asserts every app container runs an image labeled with that
+#       revision (org.opencontainers.image.revision, ADR-0001) — replaces
+#       manual digest comparison.
+#
 # Exit code 0 = all checks passed. Non-zero = at least one check failed.
 # Design rule: failure to COLLECT a signal is a check failure, never a pass.
 
@@ -17,6 +22,7 @@ SHARE_ID="${OP_SHARE_ID:-7x9QJy}"          # a known public share page (SSR cana
 EXPECTED_CONTAINERS="${OP_EXPECTED_CONTAINERS:-10}"
 FRESHNESS_MAX_SECONDS="${OP_FRESHNESS_MAX_SECONDS:-300}"
 ERROR_LOG_WINDOW="${OP_ERROR_LOG_WINDOW:-10m}"
+EXPECTED_REVISION="${OP_EXPECTED_REVISION:-}"  # full git sha the deploy shipped (ADR-0001); empty = skip check
 
 PASS=0
 FAIL=0
@@ -129,6 +135,35 @@ check_restarts() {
   fi
 }
 
+check_revision() {
+  # Every app container must carry the org.opencontainers.image.revision
+  # label (baked in by sh/docker-build, ADR-0001) matching the deployed sha.
+  # A missing label fails too — pre-ADR-0001 images don't carry it.
+  if [ -z "$EXPECTED_REVISION" ]; then
+    return  # not part of this run's check set (pre-ADR-0001 deploys)
+  fi
+  local ids
+  ids=$(docker compose ps -q op-api op-dashboard op-worker 2>/dev/null)
+  if [ -z "$ids" ]; then
+    bad "revision check: no op-api/op-dashboard/op-worker containers found"
+    return
+  fi
+  local labeled mismatches
+  labeled=$(echo "$ids" | xargs docker inspect \
+      --format '{{or (index .Config.Labels "org.opencontainers.image.revision") "MISSING"}} {{.Name}}' 2>/dev/null)
+  # One output line per container, or the signal wasn't collected.
+  if [ "$(printf '%s' "$labeled" | grep -c .)" -ne "$(printf '%s' "$ids" | grep -c .)" ]; then
+    bad "revision check: could not inspect all containers"
+    return
+  fi
+  mismatches=$(printf '%s\n' "$labeled" | awk -v want="$EXPECTED_REVISION" '$1 != want {print}')
+  if [ -n "$mismatches" ]; then
+    bad "containers not on expected revision ${EXPECTED_REVISION:0:7}:"$'\n'"$mismatches"
+  else
+    ok "all app containers on revision ${EXPECTED_REVISION:0:7}"
+  fi
+}
+
 check_error_logs() {
   local logs
   if ! logs=$(docker compose logs --since "$ERROR_LOG_WINDOW" op-api op-worker op-dashboard 2>/dev/null); then
@@ -159,6 +194,7 @@ run_checks() {
   FAIL=0
   echo "── verify-deploy @ $(date -u '+%Y-%m-%d %H:%M:%S UTC') ──"
   check_containers
+  check_revision
   check_api_health
   check_root_http
   check_share_ssr

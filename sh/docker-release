@@ -1,0 +1,32 @@
+#!/bin/bash
+# Re-point the :2 channel tag at an existing release tag (ADR-0002).
+#
+# Prod tracks :2; this script is the ONLY thing that moves it. A normal
+# deploy releases the tag just built; a rollback releases the previous one.
+# The operation is manifest-only (instant, multi-arch preserved) — prod is
+# unaffected until ./update runs on the VPS.
+#
+# Usage: ./sh/docker-release main-<7-char-sha>     # forward
+#        ./sh/docker-release main-<prev-sha>       # rollback
+set -euo pipefail
+
+RELEASE_TAG="${1:?usage: $0 <release-tag, e.g. main-abc1234>}"
+APPS=(dashboard worker api)
+
+# Validate all three images first so the channel never moves partially.
+for app in "${APPS[@]}"; do
+    image="keiwanmosaddegh/openpanel-$app"
+    if ! docker buildx imagetools inspect "$image:$RELEASE_TAG" >/dev/null 2>&1; then
+        echo "Error: $image:$RELEASE_TAG not found on Docker Hub — build it first."
+        exit 1
+    fi
+done
+
+for app in "${APPS[@]}"; do
+    image="keiwanmosaddegh/openpanel-$app"
+    docker buildx imagetools create -t "$image:2" "$image:$RELEASE_TAG"
+    echo "✔ $image:2 → $RELEASE_TAG"
+done
+
+echo ""
+echo "Channel tag :2 now points at $RELEASE_TAG. Run ./update on the VPS to apply."

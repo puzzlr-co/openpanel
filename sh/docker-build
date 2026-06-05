@@ -17,8 +17,9 @@ PRERELEASE=${ARGS[2]}  # Optional pre-release tag (e.g., "rc", "beta")
 
 if [ -z "$APP" ]; then
     echo "Please provide an app name as an argument."
-    echo "Usage: $0 <app_name> <version> [pre-release-tag] [--dry-run]"
+    echo "Usage: $0 <app_name> [version] [pre-release-tag] [--dry-run]"
     echo "Examples:"
+    echo "  $0 all                    # SHA mode: tag main-<7-char-sha> only (ADR-0001)"
     echo "  $0 all 2.1.0              # Tags: 2.1.0, 2.1, 2, latest"
     echo "  $0 all 2.1.0 rc           # Tags: 2.1.0-rc only"
     echo "  $0 all 2.1.0 --dry-run    # Dry run, shows what would be built"
@@ -26,22 +27,41 @@ if [ -z "$APP" ]; then
     exit 1
 fi
 
-# Check if version is provided
+# SHA mode (no version given): derive the immutable release tag from HEAD
+# (ADR-0001). Pushes ONLY main-<7-char-sha>; the :2 channel tag is moved
+# separately by sh/docker-release (ADR-0002).
+SHA_MODE=false
+GIT_SHA=""
 if [ -z "$VERSION" ]; then
-    echo "Please provide a version number as an argument."
-    echo "Usage: $0 $APP <version> [pre-release-tag]"
-    exit 1
+    SHA_MODE=true
+    # The release tag is a claim that image == commit: refuse dirty trees
+    # and HEADs that don't match the pushed main (real builds only).
+    if [ "$DRY_RUN" = false ]; then
+        if [ -n "$(git status --porcelain)" ]; then
+            echo "Error: working tree is dirty — commit or stash before building."
+            exit 1
+        fi
+        git fetch origin main --quiet
+        if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]; then
+            echo "Error: HEAD != origin/main — commit and push (or pull) first."
+            exit 1
+        fi
+    fi
+    GIT_SHA=$(git rev-parse HEAD)
+    VERSION="main-$(git rev-parse --short=7 HEAD)"
 fi
 
-# Validate version format (x.x.x)
-if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    echo "Error: Version must be in format x.x.x (e.g., 2.1.0)"
-    exit 1
-fi
+if [ "$SHA_MODE" = false ]; then
+    # Validate version format (x.x.x)
+    if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        echo "Error: Version must be in format x.x.x (e.g., 2.1.0)"
+        exit 1
+    fi
 
-# Extract major and minor versions
-MAJOR=$(echo "$VERSION" | cut -d. -f1)
-MINOR=$(echo "$VERSION" | cut -d. -f1-2)
+    # Extract major and minor versions
+    MAJOR=$(echo "$VERSION" | cut -d. -f1)
+    MINOR=$(echo "$VERSION" | cut -d. -f1-2)
+fi
 
 # Display build info
 if [ "$DRY_RUN" = true ]; then
@@ -49,7 +69,10 @@ if [ "$DRY_RUN" = true ]; then
     echo ""
 fi
 
-if [ -z "$PRERELEASE" ]; then
+if [ "$SHA_MODE" = true ]; then
+    echo "Building SHA release $VERSION (revision $GIT_SHA)"
+    echo "Tag that will be created: $VERSION (channel tag :2 NOT moved — use sh/docker-release)"
+elif [ -z "$PRERELEASE" ]; then
     echo "Building RELEASE version $VERSION"
     echo "Tags that will be created: $VERSION, $MINOR, $MAJOR, latest"
 else
@@ -61,12 +84,16 @@ fi
 if [ "$DRY_RUN" = true ]; then
     echo ""
 else
-    read -p "Do you wish to continue (y/N)? " -n 1 -r
-    echo    # Move to a new line
-    if [[ ! $REPLY =~ ^[Yy]$ ]]
-    then
-        echo "Aborting..."
-        exit 1
+    # SHA mode is non-interactive: it only creates a new immutable tag and
+    # cannot move anything prod tracks, so there is nothing to confirm.
+    if [ "$SHA_MODE" = false ]; then
+        read -p "Do you wish to continue (y/N)? " -n 1 -r
+        echo    # Move to a new line
+        if [[ ! $REPLY =~ ^[Yy]$ ]]
+        then
+            echo "Aborting..."
+            exit 1
+        fi
     fi
 
     # Ensure Docker Buildx is available and set up a builder
@@ -89,7 +116,10 @@ build_image() {
         # Dry run - just show what would be built
         echo "Would build: $app"
         echo "  Dockerfile: $dockerfile"
-        if [ -n "$PRERELEASE" ]; then
+        if [ "$SHA_MODE" = true ]; then
+            echo "  Image: $image_name:$VERSION"
+            echo "  Label: org.opencontainers.image.revision=$GIT_SHA"
+        elif [ -n "$PRERELEASE" ]; then
             echo "  Image: $image_name:$VERSION-$PRERELEASE"
         else
             echo "  Images:"
@@ -103,7 +133,20 @@ build_image() {
     fi
 
     # Actual build
-    if [ -n "$PRERELEASE" ]; then
+    if [ "$SHA_MODE" = true ]; then
+        # SHA release: only the immutable main-<sha> tag, with the revision
+        # baked in so prod can be asked what commit it runs (ADR-0001).
+        local tag="$image_name:$VERSION"
+        echo "(sha release) Building multi-architecture image: $tag"
+        docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            -t "$tag" \
+            --label "org.opencontainers.image.revision=$GIT_SHA" \
+            --build-arg DATABASE_URL="postgresql://p@p:5432/p" \
+            -f "$dockerfile" \
+            --push \
+            .
+    elif [ -n "$PRERELEASE" ]; then
         # Pre-release: only tag with x.x.x-prerelease
         local tag="$image_name:$VERSION-$PRERELEASE"
         echo "(pre-release) Building multi-architecture image: $tag"
@@ -145,7 +188,10 @@ if [ "$APP" == "all" ]; then
     if [ "$DRY_RUN" = false ]; then
         echo ""
         echo "All images built and pushed successfully!"
-        if [ -z "$PRERELEASE" ]; then
+        if [ "$SHA_MODE" = true ]; then
+            echo "Tagged as: $VERSION (revision $GIT_SHA)"
+            echo "Next: ./sh/docker-release $VERSION to move the :2 channel tag"
+        elif [ -z "$PRERELEASE" ]; then
             echo "Tagged as: $VERSION, $MINOR, $MAJOR, latest"
         else
             echo "Tagged as: $VERSION-$PRERELEASE"
@@ -156,7 +202,9 @@ else
     if [ "$DRY_RUN" = false ]; then
         echo ""
         echo "Image for $APP built and pushed successfully!"
-        if [ -z "$PRERELEASE" ]; then
+        if [ "$SHA_MODE" = true ]; then
+            echo "Tagged as: $VERSION (revision $GIT_SHA)"
+        elif [ -z "$PRERELEASE" ]; then
             echo "Tagged as: $VERSION, $MINOR, $MAJOR, latest"
         else
             echo "Tagged as: $VERSION-$PRERELEASE"
