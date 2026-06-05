@@ -1,0 +1,28 @@
+#!/bin/bash
+# Run verify-deploy on prod, revision-pinned to HEAD — no substitution needed.
+#
+#   ./sh/verify-prod                 # one-shot (post-ship re-runs, §2 row 1)
+#   ./sh/verify-prod --watch 15      # detached babysit; poll the printed command
+#   ./sh/verify-prod <full-sha>      # pin another revision (rollback, §3)
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+VPS="${OP_VPS:-root@91.98.228.238}"
+EXPECTED="$(git rev-parse HEAD)"
+WATCH=""
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --watch) WATCH="${2:?usage: --watch <minutes>}"; shift 2 ;;
+        *) EXPECTED="$1"; shift ;;
+    esac
+done
+
+if [ -n "$WATCH" ]; then
+    # Detached on the VPS — survives a dropped ssh; don't hold a long session.
+    ssh "$VPS" "cd ~/openpanel/self-hosting && OP_EXPECTED_REVISION=$EXPECTED nohup ./verify-deploy --watch $WATCH </dev/null >/root/babysit.log 2>&1 & echo 'babysit started ($WATCH min)'"
+    echo "poll:     ssh $VPS 'tail -3 /root/babysit.log'"
+    echo "finished: when a BABYSIT RESULT line appears"
+else
+    ssh "$VPS" "OP_EXPECTED_REVISION=$EXPECTED ~/openpanel/self-hosting/verify-deploy"
+fi

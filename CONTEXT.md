@@ -42,6 +42,6 @@ The known public share page whose render + log-grep proves server-side rendering
 > **Dev:** What's prod on right now?
 > **Ops:** The deployed revision is `65e0419` — read it off the running container's label, don't trust the registry listing.
 > **Dev:** And if tonight's release goes bad?
-> **Ops:** Pin the previous release tag, `main-<prev-sha>`, in the VPS compose file. The channel tag `:2` stays put until a fixed release re-points it via the next update.
+> **Ops:** Release the previous build — `sh/docker-release main-<prev-sha>` re-points the channel tag, then ship. No VPS file edits; rollback is just a release of an older build.
 > **Dev:** Verify passed, are we done?
 > **Ops:** No — babysit for 15 minutes; the canary and freshness checks are the ones that catch slow failures.

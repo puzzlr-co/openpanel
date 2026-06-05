@@ -1,0 +1,73 @@
+#!/bin/bash
+# Deploy preflight (runbook §1): gates + deployed revision + migration
+# classification + typecheck/tests. Zero placeholders — every value is
+# derived from git or read off prod.
+#
+# Exit codes:
+#   0  proceed (verdict + rollback command printed)
+#   1  gate failed (stop and fix; dirty/unpushed tree → stop and ask)
+#   2  ⛔ code-migrations in the release (stop and ask the operator, §4)
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+VPS="${OP_VPS:-root@91.98.228.238}"
+
+# 1. Gates — the release tag is a claim that image == commit (ADR-0001).
+if [ -n "$(git status --porcelain)" ]; then
+    echo "⛔ working tree dirty — stop and ask; never commit on your own initiative."
+    exit 1
+fi
+git fetch origin main --quiet
+if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]; then
+    echo "⛔ HEAD != origin/main — stop and ask; never push on your own initiative."
+    exit 1
+fi
+HEAD_SHA=$(git rev-parse HEAD)
+RELEASE_TAG="main-$(git rev-parse --short=7 HEAD)"
+
+# 2. Deployed revision — read off prod, never local state/registry/memory.
+PREV=$(ssh "$VPS" "docker inspect --format '{{index .Config.Labels \"org.opencontainers.image.revision\"}}' self-hosting-op-api-1")
+if [ -z "$PREV" ]; then
+    echo "⛔ prod containers carry no revision label — stop and ask."
+    exit 1
+fi
+
+# 3. Migration classification — decides the rollback policy (§2).
+MIGRATIONS=$(git diff --name-only "$PREV"..HEAD -- packages/db/prisma/migrations packages/db/code-migrations)
+if printf '%s\n' "$MIGRATIONS" | grep -q '^packages/db/code-migrations/'; then
+    CLASSIFICATION="⛔ code-migrations — read them, summarize to the operator, wait (§4)"
+elif [ -n "$MIGRATIONS" ]; then
+    CLASSIFICATION="prisma-only — proceed, auto-rollback DISARMED (§2)"
+else
+    CLASSIFICATION="code-only — auto-rollback armed (§2)"
+fi
+
+summary() {
+    echo ""
+    echo "── preflight ──"
+    echo "  release tag:  $RELEASE_TAG  ($HEAD_SHA)"
+    echo "  prod runs:    $PREV"
+    echo "  rollback:     ./sh/docker-release main-${PREV:0:7} && ./sh/ship $PREV"
+    echo "  migrations:   $CLASSIFICATION"
+    if [ -n "$MIGRATIONS" ]; then
+        printf '%s\n' "$MIGRATIONS" | sed 's/^/      /'
+    fi
+    echo "  commits in this release (derive the acceptance check from these, §1):"
+    git log --oneline "$PREV"..HEAD | sed 's/^/      /'
+    if [ -z "$(git log --oneline "$PREV"..HEAD)" ]; then
+        echo "      (none — prod already runs HEAD; ./sh/ship would be a no-op)"
+    fi
+}
+
+# ⛔ before the slow gates: the operator may halt the whole deploy, so don't
+# burn minutes on tests first.
+if [[ "$CLASSIFICATION" == ⛔* ]]; then
+    summary
+    exit 2
+fi
+
+# 4. Typecheck + tests (the slow part — cheap gates above fail fast).
+pnpm typecheck
+pnpm test
+
+summary

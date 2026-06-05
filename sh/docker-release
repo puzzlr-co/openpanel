@@ -6,12 +6,28 @@
 # The operation is manifest-only (instant, multi-arch preserved) — prod is
 # unaffected until ./update runs on the VPS.
 #
-# Usage: ./sh/docker-release main-<7-char-sha>     # forward
-#        ./sh/docker-release main-<prev-sha>       # rollback
+# Usage: ./sh/docker-release                       # forward: the build of HEAD
+#        ./sh/docker-release main-<prev-sha>       # rollback: a previous build
 set -euo pipefail
 
-RELEASE_TAG="${1:?usage: $0 <release-tag, e.g. main-abc1234>}"
+RELEASE_TAG="${1:-}"
 APPS=(dashboard worker api)
+
+if [ -z "$RELEASE_TAG" ]; then
+    # No arg: release the build of HEAD. Same gates as the build — the
+    # channel may only move to a tag that matches the pushed main.
+    if [ -n "$(git status --porcelain)" ]; then
+        echo "Error: working tree dirty — clean up, or pass an explicit release tag."
+        exit 1
+    fi
+    git fetch origin main --quiet
+    if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]; then
+        echo "Error: HEAD != origin/main — push/pull first, or pass an explicit release tag."
+        exit 1
+    fi
+    RELEASE_TAG="main-$(git rev-parse --short=7 HEAD)"
+    echo "Releasing the build of HEAD: $RELEASE_TAG"
+fi
 
 # Validate all three images first so the channel never moves partially.
 for app in "${APPS[@]}"; do

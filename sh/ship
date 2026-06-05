@@ -1,0 +1,33 @@
+#!/bin/bash
+# Backup + update + revision-pinned verify on the VPS, in one shot (runbook
+# happy path). ~30 s of full outage while compose recreates the app
+# containers; db/kv/ch are never recreated by a code release.
+#
+#   ./sh/ship              # ship HEAD (the revision just built + released)
+#   ./sh/ship <full-sha>   # pin another released revision (rollback, §3)
+#
+# The pg_dump covers the only state a routine release can corrupt (Postgres,
+# via auto-migrations); the chained test/grep abort before ./update on an
+# empty or failed dump. ClickHouse events are append-only and untouched.
+#
+# Retention: keeps the 5 most recent deploy dumps (4 old + the new one) —
+# a dump's restore value dies with the next successful deploy, but it holds
+# every secret in Postgres, so old ones must not pile up in /root. The strict
+# date globs can never match the operator-managed one-off backups
+# (backup-{ch,pg}-datadir.tar.gz, backup-pre-v2.sql, ...).
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+VPS="${OP_VPS:-root@91.98.228.238}"
+EXPECTED="${1:-$(git rev-parse HEAD)}"
+
+ssh "$VPS" "set -e
+ls -1t /root/backup-????-??-??-????.sql /root/backup-????-??-??.sql 2>/dev/null | tail -n +5 | xargs -r rm -v
+backup=/root/backup-\$(date +%F-%H%M).sql
+docker exec self-hosting-op-db-1 pg_dump -U postgres postgres > \"\$backup\"
+test -s \"\$backup\"
+head -3 \"\$backup\" | grep -q 'PostgreSQL database dump'
+echo \"backup OK: \$backup\"
+cd ~/openpanel/self-hosting && ./update
+OP_EXPECTED_REVISION=$EXPECTED ./verify-deploy
+"
