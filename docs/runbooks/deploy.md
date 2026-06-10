@@ -98,7 +98,7 @@ cd ~/openpanel/self-hosting
 docker compose run --rm --no-deps op-api sh -c "CI=true pnpm -r run migrate:deploy"
 ```
 
-Worked example: `docs/plans/2026-03-17-001-feat-upgrade-openpanel-v1-to-v2-plan.md` Phase 4.8.
+Worked example: the v1→v2 upgrade plan, Phase 4.8 (retired after completion; see git history — `git log --all --oneline -- docs/plans/`).
 
 ## 5. Gotchas (encoded from incidents)
 
