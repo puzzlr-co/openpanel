@@ -1,9 +1,10 @@
 ---
 title: "feat: Upgrade Self-Hosted OpenPanel v1 to v2"
 type: feat
-status: complete
+status: done
 date: 2026-03-17
-origin: docs/brainstorms/2026-03-17-upgrade-to-v2-brainstorm.md (removed 2026-06-04 after completion; decisions absorbed into this plan)
+completed: 2026-06-10
+origin: docs/brainstorms/2026-03-17-upgrade-to-v2-brainstorm.md
 ---
 
 # Upgrade Self-Hosted OpenPanel v1 to v2
@@ -18,7 +19,7 @@ Upgrade the production self-hosted OpenPanel instance (`activity.puzzlr.net`) fr
 
 The fork is 255 commits behind upstream. v2 brings a redesigned Tanstack dashboard, revenue tracking, session replay, customizable Grafana-style dashboards, Google Search Console integration, and significant bug fixes. Staying on v1 means missing these features and accumulating drift that makes future upgrades harder.
 
-Strategy chosen in the (since-removed) brainstorm: **Fresh Start + Rebuild** — start from `upstream/main` and rebuild the org secret feature, rather than merging 255 upstream commits into the fork or running official images (which can't carry the custom org secret auth).
+(see brainstorm: docs/brainstorms/2026-03-17-upgrade-to-v2-brainstorm.md — Strategy: Fresh Start + Rebuild)
 
 ## Technical Approach
 
@@ -42,7 +43,8 @@ No architectural changes — same 6-service Docker Compose stack. Key version bu
 | 2.5 Custom Widgets | Done (2026-06-02, images 2.0.0 pushed) |
 | 3. VPS Backup | Done (2026-06-03) |
 | 4. VPS Upgrade | Done (2026-06-03, downtime 18:03–18:17 UTC, ~13 min) |
-| 5. Verification | Done (2026-06-03; §5.4 cleanup scheduled for 2026-06-10) |
+| 5. Verification | Done (2026-06-03) |
+| 5.4 Post-upgrade cleanup | Done (2026-06-10, +7 days) |
 
 ### Implementation Phases
 
@@ -86,7 +88,7 @@ model Organization {
 
 `apps/api/src/utils/auth.ts` — add org secret fallback after client secret verification.
 
-**3 improvements over v1 implementation:**
+**3 improvements over v1 implementation** (see brainstorm: docs/brainstorms/2026-03-17-upgrade-to-v2-brainstorm.md — Key Decision #3):
 
 **Improvement 1: SHA-256 cache keys** (security fix)
 
@@ -506,16 +508,22 @@ ssh root@91.98.228.238 'docker exec self-hosting-op-db-1 psql -U postgres -c "\d
 - [ ] Revenue tracking UI is available (new v2 feature) — not yet exercised
 - [x] Customizable dashboards work (user visual check 2026-06-03)
 
-##### 5.4 Post-upgrade cleanup (after 7 days)
+##### 5.4 Post-upgrade cleanup (after 7 days) — Done (2026-06-10)
+
+Executed after a full week of healthy v2 operation (all containers up 4–6 days, ingestion grown 36.79M→40.70M events). Dropped both frozen backup tables and removed the upgrade rollback artifacts.
 
 ```bash
 # Drop ClickHouse backup tables from migration #8
 ssh root@91.98.228.238 'docker exec self-hosting-op-ch-1 clickhouse-client --query "DROP TABLE IF EXISTS openpanel.events_20251123"'
 ssh root@91.98.228.238 'docker exec self-hosting-op-ch-1 clickhouse-client --query "DROP TABLE IF EXISTS openpanel.sessions_20251123"'
 
-# Remove backup files (including the cold volume tars and 4.7 baselines)
-ssh root@91.98.228.238 'rm /root/backup-pre-v2.sql /root/backup-*.csv /root/backup-*.txt /root/backup-*.tar.gz /root/baseline-*.txt'
+# Remove backup files — EXPLICIT paths only (the CSV exports were already gone).
+# Do NOT use `rm /root/backup-*`: a daily PG-dump routine now writes /root/backup-YYYY-MM-DD*.sql
+# which is live operational backup, NOT upgrade residue — the glob would destroy it.
+ssh root@91.98.228.238 'rm -f /root/backup-pre-v2.sql /root/backup-ch-counts.txt /root/backup-container-state.txt /root/backup-image-ids.txt /root/backup-ch-datadir.tar.gz /root/backup-pg-datadir.tar.gz /root/baseline-events.txt /root/baseline-sessions.txt /root/migration-4.8.log'
 ```
+
+**Preserved:** `/root/backup-2026-06-04.sql`, `/root/backup-2026-06-05-0901.sql` (daily PG dumps, unrelated to this upgrade).
 
 ---
 
@@ -548,9 +556,9 @@ ssh root@91.98.228.238 'rm /root/backup-pre-v2.sql /root/backup-*.csv /root/back
 
 ## Alternative Approaches Considered
 
-1. **Merge upstream into fork** — Rejected. 255 upstream commits would create extensive merge conflicts in schema.prisma, auth.ts, dashboard components.
-2. **Use official Docker images** — Rejected. Can't include org secret feature without custom code.
-3. **Cherry-pick org secret as-is** — Rejected. Opportunity to fix cache key security issue and add missing cache invalidation.
+1. **Merge upstream into fork** — Rejected. 255 upstream commits would create extensive merge conflicts in schema.prisma, auth.ts, dashboard components. (see brainstorm)
+2. **Use official Docker images** — Rejected. Can't include org secret feature without custom code. (see brainstorm)
+3. **Cherry-pick org secret as-is** — Rejected. Opportunity to fix cache key security issue and add missing cache invalidation. (see brainstorm — Key Decision #3)
 
 ## Acceptance Criteria
 
@@ -629,7 +637,7 @@ Data loss on rollback = events ingested between the 4.3 tar and the rollback —
 
 ### Origin
 
-- **Brainstorm document:** `docs/brainstorms/2026-03-17-upgrade-to-v2-brainstorm.md` (removed 2026-06-04 after completion)
+- **Brainstorm document:** [docs/brainstorms/2026-03-17-upgrade-to-v2-brainstorm.md](docs/brainstorms/2026-03-17-upgrade-to-v2-brainstorm.md)
   - Key decisions carried forward: fresh start strategy, rebuild org secret with improvements, keep custom Docker images, full backup approach
 
 ### Internal References
