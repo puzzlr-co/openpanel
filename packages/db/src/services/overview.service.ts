@@ -486,7 +486,7 @@ export class OverviewService {
     // Denominator/numerator are scoped per-metric via `name` so the broader
     // multi-name scan produces identical values to the old per-metric queries.
     const returningRateExpr =
-      "round(countIf(name = 'session_started' AND toUInt32OrZero(properties['days_since_first_visit']) > 0) * 100.0 / nullIf(countIf(name = 'session_started'), 0), 1) AS returning_rate";
+      "round(countIf(name = 'session_started' AND days_since_first_visit > 0) * 100.0 / nullIf(countIf(name = 'session_started'), 0), 1) AS returning_rate";
     const levelCompletionExpr =
       "round(countIf(name = 'level_completed') * 100.0 / nullIf(countIf(name = 'level_started'), 0), 1) AS level_completion";
 
@@ -598,7 +598,7 @@ export class OverviewService {
       .select<{ bucket: string; session_id: string; games: number }>([
         `${clix.toStartOf('created_at', interval as any, timezone)} AS bucket`,
         'session_id',
-        "uniqExact(properties['game_id']) AS games",
+        'uniqExact(game_id) AS games',
       ])
       .from(TABLE_NAMES.events)
       .where('project_id', '=', projectId)
@@ -666,7 +666,7 @@ export class OverviewService {
     }[]
   > {
     const fillConfig = this.getFillConfig(interval, startDate, endDate);
-    const dsfv = "toUInt32OrZero(properties['days_since_first_visit'])";
+    const dsfv = 'days_since_first_visit';
 
     const query = clix(this.client, timezone)
       .select<{
@@ -740,7 +740,7 @@ export class OverviewService {
   }: IGetMetricsInput): Promise<
     { cohort_week: string; life_week: number; sessions: number }[]
   > {
-    const dsfv = "toUInt32OrZero(properties['days_since_first_visit'])";
+    const dsfv = 'days_since_first_visit';
     const cohortWeek = `toStartOfWeek(subtractDays(toDate(created_at), ${dsfv}))`;
     const lifeWeek = `intDiv(${dsfv}, 7)`;
 
@@ -1773,7 +1773,7 @@ export class OverviewService {
     timezone: string;
   }): Promise<Array<{ game_id: string; started: number; completed: number }>> {
     const where = this.getRawWhereClause('events', filters);
-    const gameKey = getSelectPropertyKey('properties.game_id');
+    const gameKey = 'game_id';
 
     const query = clix(this.client, timezone)
       .select<{ game_id: string; started: number; completed: number }>([
