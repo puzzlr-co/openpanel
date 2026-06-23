@@ -268,12 +268,14 @@ export const overviewRouter = createTRPCRouter({
     .use(cacher)
     .query(async ({ input }) => {
       const { timezone } = await getSettingsForProject(input.projectId);
+      // avg_dau, returning_rate and level_completion are computed together in a
+      // single events scan by getEventMetrics (was three separate metrics); the
+      // session metrics and the session-grain multi_game share remain their own
+      // scans. This cuts overview.stats from five metric fetches to three.
       const [
         { current, previous },
-        { current: avgDauCurrent, previous: avgDauPrevious },
+        { current: eventsCurrent, previous: eventsPrevious },
         { current: multiGameCurrent, previous: multiGamePrevious },
-        { current: returningCurrent, previous: returningPrevious },
-        { current: completionCurrent, previous: completionPrevious },
       ] = await Promise.all([
         getCurrentAndPrevious(
           { ...input, timezone },
@@ -284,30 +286,20 @@ export const overviewRouter = createTRPCRouter({
           { ...input, timezone },
           true,
           timezone,
-        )(overviewService.getAvgDau.bind(overviewService)),
+        )(overviewService.getEventMetrics.bind(overviewService)),
         getCurrentAndPrevious(
           { ...input, timezone },
           true,
           timezone,
         )(overviewService.getMultiGameSessions.bind(overviewService)),
-        getCurrentAndPrevious(
-          { ...input, timezone },
-          true,
-          timezone,
-        )(overviewService.getReturningRate.bind(overviewService)),
-        getCurrentAndPrevious(
-          { ...input, timezone },
-          true,
-          timezone,
-        )(overviewService.getLevelCompletion.bind(overviewService)),
       ]);
       return {
         metrics: {
           ...current.metrics,
-          avg_dau: avgDauCurrent.metrics.avg_dau,
+          avg_dau: eventsCurrent.metrics.avg_dau,
           multi_game_sessions: multiGameCurrent.metrics.multi_game_sessions,
-          returning_rate: returningCurrent.metrics.returning_rate,
-          level_completion: completionCurrent.metrics.level_completion,
+          returning_rate: eventsCurrent.metrics.returning_rate,
+          level_completion: eventsCurrent.metrics.level_completion,
           prev_bounce_rate: previous?.metrics.bounce_rate || null,
           prev_unique_visitors: previous?.metrics.unique_visitors || null,
           prev_total_screen_views: previous?.metrics.total_screen_views || null,
@@ -316,31 +308,27 @@ export const overviewRouter = createTRPCRouter({
           prev_views_per_session: previous?.metrics.views_per_session || null,
           prev_total_sessions: previous?.metrics.total_sessions || null,
           prev_total_revenue: previous?.metrics.total_revenue || null,
-          prev_avg_dau: avgDauPrevious?.metrics.avg_dau || null,
+          prev_avg_dau: eventsPrevious?.metrics.avg_dau || null,
           prev_multi_game_sessions:
             multiGamePrevious?.metrics.multi_game_sessions || null,
-          prev_returning_rate: returningPrevious?.metrics.returning_rate || null,
+          prev_returning_rate: eventsPrevious?.metrics.returning_rate || null,
           prev_level_completion:
-            completionPrevious?.metrics.level_completion || null,
+            eventsPrevious?.metrics.level_completion || null,
         },
         series: current.series.map((item, index) => {
           const prev = previous?.series[index];
-          const avgDauCurrentItem = avgDauCurrent.series[index];
-          const avgDauPrevItem = avgDauPrevious?.series[index];
+          const eventsCurrentItem = eventsCurrent.series[index];
+          const eventsPrevItem = eventsPrevious?.series[index];
           const multiGameCurrentItem = multiGameCurrent.series[index];
           const multiGamePrevItem = multiGamePrevious?.series[index];
-          const returningCurrentItem = returningCurrent.series[index];
-          const returningPrevItem = returningPrevious?.series[index];
-          const completionCurrentItem = completionCurrent.series[index];
-          const completionPrevItem = completionPrevious?.series[index];
           return {
             ...item,
             date: format(item.date, 'yyyy-MM-dd HH:mm:ss'),
-            avg_dau: avgDauCurrentItem?.avg_dau ?? 0,
+            avg_dau: eventsCurrentItem?.avg_dau ?? 0,
             multi_game_sessions:
               multiGameCurrentItem?.multi_game_sessions ?? 0,
-            returning_rate: returningCurrentItem?.returning_rate ?? 0,
-            level_completion: completionCurrentItem?.level_completion ?? 0,
+            returning_rate: eventsCurrentItem?.returning_rate ?? 0,
+            level_completion: eventsCurrentItem?.level_completion ?? 0,
             prev_bounce_rate: prev?.bounce_rate,
             prev_unique_visitors: prev?.unique_visitors,
             prev_total_screen_views: prev?.total_screen_views,
@@ -348,10 +336,10 @@ export const overviewRouter = createTRPCRouter({
             prev_views_per_session: prev?.views_per_session,
             prev_total_sessions: prev?.total_sessions,
             prev_total_revenue: prev?.total_revenue,
-            prev_avg_dau: avgDauPrevItem?.avg_dau,
+            prev_avg_dau: eventsPrevItem?.avg_dau,
             prev_multi_game_sessions: multiGamePrevItem?.multi_game_sessions,
-            prev_returning_rate: returningPrevItem?.returning_rate,
-            prev_level_completion: completionPrevItem?.level_completion,
+            prev_returning_rate: eventsPrevItem?.returning_rate,
+            prev_level_completion: eventsPrevItem?.level_completion,
           };
         }),
       };

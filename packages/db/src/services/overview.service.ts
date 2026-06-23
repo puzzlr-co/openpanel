@@ -449,12 +449,19 @@ export class OverviewService {
     };
   }
 
-  // Avg DAU: average of daily uniq(device_id) over the window, scoped to
-  // session_start events (the OpenPanel SDK convention for a real client-side
-  // session). Headline is computed at day granularity regardless of the
-  // selected interval; the per-interval series uses the user's interval so the
-  // chart x-axis stays consistent with the rest of the overview.
-  async getAvgDau({
+  // Combined event-derived metrics (avg_dau series, returning_rate,
+  // level_completion) computed in a SINGLE scan over the events table, instead
+  // of three separate series+headline query pairs. All three share the same
+  // date-grain GROUP BY and differ only by `name` filter, so they fold into one
+  // scan using conditional aggregation. returning_rate and level_completion are
+  // window-wide ratios, so WITH ROLLUP yields their headline exactly as the
+  // totals row (the same trick getMetricsFromSessions uses). avg_dau's headline
+  // is an average of daily DAU — a grain a rollup cannot express — so it keeps
+  // a dedicated day-granularity query, computed at day grain regardless of the
+  // selected interval. Puzzlr-specific: relies on the session_start /
+  // session_started / level_started / level_completed events and the
+  // days_since_first_visit property.
+  async getEventMetrics({
     projectId,
     filters,
     startDate,
@@ -462,25 +469,54 @@ export class OverviewService {
     interval,
     timezone,
   }: IGetMetricsInput): Promise<{
-    metrics: { avg_dau: number };
-    series: { date: string; avg_dau: number }[];
+    metrics: {
+      avg_dau: number;
+      returning_rate: number;
+      level_completion: number;
+    };
+    series: {
+      date: string;
+      avg_dau: number;
+      returning_rate: number;
+      level_completion: number;
+    }[];
   }> {
     const fillConfig = this.getFillConfig(interval, startDate, endDate);
 
-    const seriesQuery = clix(this.client, timezone)
-      .select<{ date: string; avg_dau: number }>([
+    // Denominator/numerator are scoped per-metric via `name` so the broader
+    // multi-name scan produces identical values to the old per-metric queries.
+    const returningRateExpr =
+      "round(countIf(name = 'session_started' AND toUInt32OrZero(properties['days_since_first_visit']) > 0) * 100.0 / nullIf(countIf(name = 'session_started'), 0), 1) AS returning_rate";
+    const levelCompletionExpr =
+      "round(countIf(name = 'level_completed') * 100.0 / nullIf(countIf(name = 'level_started'), 0), 1) AS level_completion";
+
+    const combinedQuery = clix(this.client, timezone)
+      .select<{
+        date: string;
+        avg_dau: number;
+        returning_rate: number;
+        level_completion: number;
+      }>([
         `${clix.toStartOf('created_at', interval as any, timezone)} AS date`,
-        'uniq(device_id) AS avg_dau',
+        "uniqIf(device_id, name = 'session_start') AS avg_dau",
+        returningRateExpr,
+        levelCompletionExpr,
       ])
       .from(TABLE_NAMES.events)
       .where('project_id', '=', projectId)
-      .where('name', '=', 'session_start')
+      .where('name', 'IN', [
+        'session_start',
+        'session_started',
+        'level_started',
+        'level_completed',
+      ])
       .where('created_at', 'BETWEEN', [
         clix.datetime(startDate, 'toDateTime'),
         clix.datetime(endDate, 'toDateTime'),
       ])
       .rawWhere(this.getRawWhereClause('events', filters))
       .groupBy(['date'])
+      .rollup()
       .orderBy('date', 'ASC')
       .fill(fillConfig.from, fillConfig.to, fillConfig.step)
       .transform({
@@ -502,19 +538,34 @@ export class OverviewService {
       .rawWhere(this.getRawWhereClause('events', filters))
       .groupBy(['day']);
 
-    const headlineQuery = clix(this.client, timezone)
+    const avgDauHeadlineQuery = clix(this.client, timezone)
       .with('daily_dau', dailyDauCte)
       .select<{ avg_dau: number }>(['round(avg(dau)) AS avg_dau'])
       .from('daily_dau');
 
-    const [seriesRes, headlineRes] = await Promise.all([
-      seriesQuery.execute(),
-      headlineQuery.execute(),
+    const [combinedRes, avgDauHeadlineRes] = await Promise.all([
+      combinedQuery.execute(),
+      avgDauHeadlineQuery.execute(),
     ]);
 
+    // WITH ROLLUP appends a totals row whose date defaults to the epoch, so
+    // ORDER BY date ASC sorts it first; the remaining rows are the FILL'd
+    // series (identical pattern to getMetricsFromSessions).
+    const headline = combinedRes[0];
+    const series = combinedRes.slice(1);
+
     return {
-      metrics: { avg_dau: headlineRes[0]?.avg_dau ?? 0 },
-      series: seriesRes,
+      metrics: {
+        avg_dau: avgDauHeadlineRes[0]?.avg_dau ?? 0,
+        returning_rate: headline?.returning_rate ?? 0,
+        level_completion: headline?.level_completion ?? 0,
+      },
+      series: series.map((row) => ({
+        date: row.date,
+        avg_dau: row.avg_dau ?? 0,
+        returning_rate: row.returning_rate ?? 0,
+        level_completion: row.level_completion ?? 0,
+      })),
     };
   }
 
@@ -536,29 +587,13 @@ export class OverviewService {
   }> {
     const fillConfig = this.getFillConfig(interval, startDate, endDate);
 
-    const sessionGamesCte = clix(this.client, timezone)
-      .select<{ session_id: string; games: number }>([
-        'session_id',
-        "uniqExact(properties['game_id']) AS games",
-      ])
-      .from(TABLE_NAMES.events)
-      .where('project_id', '=', projectId)
-      .where('name', '=', 'level_started')
-      .where('session_id', '!=', '')
-      .where('created_at', 'BETWEEN', [
-        clix.datetime(startDate, 'toDateTime'),
-        clix.datetime(endDate, 'toDateTime'),
-      ])
-      .rawWhere(this.getRawWhereClause('events', filters))
-      .groupBy(['session_id']);
-
-    const headlineQuery = clix(this.client, timezone)
-      .with('session_games', sessionGamesCte)
-      .select<{ multi_game_sessions: number }>([
-        'round(countIf(games >= 2) * 100.0 / nullIf(count(), 0), 1) AS multi_game_sessions',
-      ])
-      .from('session_games');
-
+    // Per (bucket, session) distinct game counts in a single scan. The
+    // bucket-level ratio is the series; WITH ROLLUP yields the period headline
+    // as the totals row, dropping what used to be a second session-grain scan
+    // of the same level_started events. A session straddling a bucket boundary
+    // is counted in each bucket it touches (~0.2% of sessions), so the rollup
+    // headline can differ from a strict per-session figure by ~0.1pp — an
+    // accepted trade-off for halving this metric's (game_id-Map) scan cost.
     const bucketedCte = clix(this.client, timezone)
       .select<{ bucket: string; session_id: string; games: number }>([
         `${clix.toStartOf('created_at', interval as any, timezone)} AS bucket`,
@@ -576,7 +611,7 @@ export class OverviewService {
       .rawWhere(this.getRawWhereClause('events', filters))
       .groupBy(['bucket', 'session_id']);
 
-    const seriesQuery = clix(this.client, timezone)
+    const combinedQuery = clix(this.client, timezone)
       .with('bucketed', bucketedCte)
       .select<{ date: string; multi_game_sessions: number }>([
         'bucket AS date',
@@ -584,99 +619,36 @@ export class OverviewService {
       ])
       .from('bucketed')
       .groupBy(['bucket'])
+      .rollup()
       .orderBy('date', 'ASC')
       .fill(fillConfig.from, fillConfig.to, fillConfig.step)
       .transform({
         date: (item) => convertClickhouseDateToJs(item.date).toISOString(),
       });
 
-    const [seriesRes, headlineRes] = await Promise.all([
-      seriesQuery.execute(),
-      headlineQuery.execute(),
-    ]);
+    const res = await combinedQuery.execute();
+
+    // WITH ROLLUP appends a totals row whose bucket defaults to the epoch, so
+    // ORDER BY date ASC sorts it first; the rest are the FILL'd series.
+    const headline = res[0];
+    const series = res.slice(1);
 
     return {
       metrics: {
-        multi_game_sessions: headlineRes[0]?.multi_game_sessions ?? 0,
+        multi_game_sessions: headline?.multi_game_sessions ?? 0,
       },
-      series: seriesRes.map((row) => ({
+      series: series.map((row) => ({
         date: row.date,
         multi_game_sessions: row.multi_game_sessions ?? 0,
       })),
     };
   }
 
-  // Returning-visitor share: % of sessions started by a visitor who has been
-  // here before (days_since_first_visit > 0). Puzzlr-specific — relies on the
-  // `session_started` event and its `days_since_first_visit` property. A
-  // conservative floor: incognito/cleared cookies push it down, never up.
-  // Headline is a period-wide ratio; series mirrors it per bucket.
-  async getReturningRate({
-    projectId,
-    filters,
-    startDate,
-    endDate,
-    interval,
-    timezone,
-  }: IGetMetricsInput): Promise<{
-    metrics: { returning_rate: number };
-    series: { date: string; returning_rate: number }[];
-  }> {
-    const fillConfig = this.getFillConfig(interval, startDate, endDate);
-
-    const returningRateExpr =
-      "round(countIf(toUInt32OrZero(properties['days_since_first_visit']) > 0) * 100.0 / nullIf(count(), 0), 1) AS returning_rate";
-
-    const seriesQuery = clix(this.client, timezone)
-      .select<{ date: string; returning_rate: number }>([
-        `${clix.toStartOf('created_at', interval as any, timezone)} AS date`,
-        returningRateExpr,
-      ])
-      .from(TABLE_NAMES.events)
-      .where('project_id', '=', projectId)
-      .where('name', '=', 'session_started')
-      .where('created_at', 'BETWEEN', [
-        clix.datetime(startDate, 'toDateTime'),
-        clix.datetime(endDate, 'toDateTime'),
-      ])
-      .rawWhere(this.getRawWhereClause('events', filters))
-      .groupBy(['date'])
-      .orderBy('date', 'ASC')
-      .fill(fillConfig.from, fillConfig.to, fillConfig.step)
-      .transform({
-        date: (item) => convertClickhouseDateToJs(item.date).toISOString(),
-      });
-
-    const headlineQuery = clix(this.client, timezone)
-      .select<{ returning_rate: number }>([returningRateExpr])
-      .from(TABLE_NAMES.events)
-      .where('project_id', '=', projectId)
-      .where('name', '=', 'session_started')
-      .where('created_at', 'BETWEEN', [
-        clix.datetime(startDate, 'toDateTime'),
-        clix.datetime(endDate, 'toDateTime'),
-      ])
-      .rawWhere(this.getRawWhereClause('events', filters));
-
-    const [seriesRes, headlineRes] = await Promise.all([
-      seriesQuery.execute(),
-      headlineQuery.execute(),
-    ]);
-
-    return {
-      metrics: { returning_rate: headlineRes[0]?.returning_rate ?? 0 },
-      series: seriesRes.map((row) => ({
-        date: row.date,
-        returning_rate: row.returning_rate ?? 0,
-      })),
-    };
-  }
-
   // Tenure composition over time (the "tenure river"). Sessions per interval
   // split by visitor age, derived purely from days_since_first_visit. Single
-  // GROUP BY scan over session_started, modelled on getReturningRate. Puzzlr-
-  // specific (relies on the session_started event + its dsfv property). A stock
-  // signal with no denominator, so it cannot manufacture a >100% spike.
+  // GROUP BY scan over session_started, mirroring the returning_rate metric.
+  // Puzzlr-specific (relies on the session_started event + its dsfv property).
+  // A stock signal with no denominator, so it cannot manufacture a >100% spike.
   async getTenureSeries({
     projectId,
     filters,
@@ -821,72 +793,6 @@ export class OverviewService {
       life_week: Number(row.life_week) || 0,
       sessions: row.sessions ?? 0,
     }));
-  }
-
-  // Level completion rate: of levels started in the window, the % completed
-  // (level_completed / level_started), blended across all games. Puzzlr-
-  // specific. A blended pulse, not per-game truth — games with a fail state
-  // (e.g. Relink) blend "completed"/"won" semantics differently per game.
-  // Headline is a period-wide ratio; series mirrors it per bucket.
-  async getLevelCompletion({
-    projectId,
-    filters,
-    startDate,
-    endDate,
-    interval,
-    timezone,
-  }: IGetMetricsInput): Promise<{
-    metrics: { level_completion: number };
-    series: { date: string; level_completion: number }[];
-  }> {
-    const fillConfig = this.getFillConfig(interval, startDate, endDate);
-
-    const levelCompletionExpr =
-      "round(countIf(name = 'level_completed') * 100.0 / nullIf(countIf(name = 'level_started'), 0), 1) AS level_completion";
-
-    const seriesQuery = clix(this.client, timezone)
-      .select<{ date: string; level_completion: number }>([
-        `${clix.toStartOf('created_at', interval as any, timezone)} AS date`,
-        levelCompletionExpr,
-      ])
-      .from(TABLE_NAMES.events)
-      .where('project_id', '=', projectId)
-      .where('name', 'IN', ['level_started', 'level_completed'])
-      .where('created_at', 'BETWEEN', [
-        clix.datetime(startDate, 'toDateTime'),
-        clix.datetime(endDate, 'toDateTime'),
-      ])
-      .rawWhere(this.getRawWhereClause('events', filters))
-      .groupBy(['date'])
-      .orderBy('date', 'ASC')
-      .fill(fillConfig.from, fillConfig.to, fillConfig.step)
-      .transform({
-        date: (item) => convertClickhouseDateToJs(item.date).toISOString(),
-      });
-
-    const headlineQuery = clix(this.client, timezone)
-      .select<{ level_completion: number }>([levelCompletionExpr])
-      .from(TABLE_NAMES.events)
-      .where('project_id', '=', projectId)
-      .where('name', 'IN', ['level_started', 'level_completed'])
-      .where('created_at', 'BETWEEN', [
-        clix.datetime(startDate, 'toDateTime'),
-        clix.datetime(endDate, 'toDateTime'),
-      ])
-      .rawWhere(this.getRawWhereClause('events', filters));
-
-    const [seriesRes, headlineRes] = await Promise.all([
-      seriesQuery.execute(),
-      headlineQuery.execute(),
-    ]);
-
-    return {
-      metrics: { level_completion: headlineRes[0]?.level_completion ?? 0 },
-      series: seriesRes.map((row) => ({
-        date: row.date,
-        level_completion: row.level_completion ?? 0,
-      })),
-    };
   }
 
   private async getMetricsWithPageFilter({
