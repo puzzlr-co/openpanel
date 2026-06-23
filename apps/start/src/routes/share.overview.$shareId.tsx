@@ -104,7 +104,7 @@ function RouteComponent() {
           const Widget = widget.component;
           const el = <Widget projectId={projectId} shareId={shareId} {...widget.props} />;
           return widget.lazyViewport ? (
-            <LazyComponent key={widget.key} className="col-span-6">{el}</LazyComponent>
+            <LazyComponent key={widget.key} className={widget.wrapperClassName ?? 'col-span-6'}>{el}</LazyComponent>
           ) : (
             <Fragment key={widget.key}>{el}</Fragment>
           );

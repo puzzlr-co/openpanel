@@ -30,8 +30,16 @@ const TOP_GAMES: OverviewWidgetDef = {
   contexts: ['dashboard', 'share'],
 };
 
-// The unmodified top-devices def, re-inserted after top-events.
-const TOP_DEVICES = DEFAULT_WIDGETS.find(w => w.key === 'top-devices')!;
+// The top-devices def, re-inserted after top-events. Deferred until it scrolls
+// into view: it sits in the bottom content row (paired with Top geo), so on a
+// typical viewport it's below the fold — keeping its overview.topGeneric query
+// out of the cold-load burst that saturates the 8-core ClickHouse box. Half
+// width, so the LazyComponent wrapper must keep its col-span (md:col-span-3).
+const TOP_DEVICES: OverviewWidgetDef = {
+  ...DEFAULT_WIDGETS.find(w => w.key === 'top-devices')!,
+  lazyViewport: true,
+  wrapperClassName: 'col-span-6 md:col-span-3',
+};
 
 // Widgets removed from the overview entirely:
 // - insights (upstream dashboard-only widget)
@@ -53,6 +61,12 @@ const FORK_WIDGETS: OverviewWidgetDef[] = DEFAULT_WIDGETS
     // Swap in the drill-down Events widget (event -> property keys -> values).
     if (w.key === 'top-events') {
       return [{ ...w, component: OverviewTopEventsProperties }, TOP_DEVICES];
+    }
+    // Top geo (the heaviest cold-load query, overview.map) pairs with Top
+    // devices in the bottom row — defer it to viewport too so the heavy map
+    // scan leaves the initial burst. Half width like devices.
+    if (w.key === 'top-geo') {
+      return [{ ...w, lazyViewport: true, wrapperClassName: 'col-span-6 md:col-span-3' }];
     }
     return [w];
   });

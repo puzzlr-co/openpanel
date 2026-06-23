@@ -15,6 +15,13 @@ export interface OverviewWidgetDef {
   contexts: ('dashboard' | 'share')[];
   /** Wrap in LazyComponent for viewport-based lazy rendering */
   lazyViewport?: boolean;
+  /**
+   * Grid class for the LazyComponent wrapper (the grid item) when `lazyViewport`
+   * is set. Defaults to `col-span-6`. Set this to match the inner widget's own
+   * col-span (e.g. `col-span-6 md:col-span-3`) so deferring a half-width widget
+   * doesn't force it full-width.
+   */
+  wrapperClassName?: string;
   /** Extra props spread onto the component */
   props?: Record<string, unknown>;
 }
