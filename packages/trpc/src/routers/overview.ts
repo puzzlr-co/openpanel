@@ -44,13 +44,18 @@ const cacher = cacheMiddleware((input, opts) => {
   }
 
   switch (range) {
+    // Realtime ranges: keep near-live so new events surface within ~1s.
     case '30min':
     case 'today':
     case 'lastHour':
     case 'last24h':
       return 1;
+    // Non-realtime ranges (7d/30d/90d/6m/12m/…): the underlying aggregations
+    // barely move minute-to-minute, so cache for 60s (matching chart.ts
+    // precedent) to serve re-mounts/re-navigations from Redis instead of
+    // re-running the heavy ClickHouse query set on every load.
     default:
-      return 1;
+      return 60;
   }
 });
 
