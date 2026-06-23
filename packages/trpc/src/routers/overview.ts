@@ -30,6 +30,7 @@ import { z } from 'zod';
 import { getProjectAccess } from '../access';
 import { runFilterCommand } from '../agents/filter-command';
 import { TRPCAccessError, TRPCForbiddenError } from '../errors';
+import { REALTIME_RANGES, getCachedPreviousPeriod } from './overview.cache';
 import {
   cacheMiddleware,
   createTRPCRouter,
@@ -102,7 +103,8 @@ function getCurrentAndPrevious<
   const previous = getChartPrevStartEndDate(current);
 
   return async <R>(
-    fn: (input: T & { startDate: string; endDate: string }) => Promise<R>
+    fn: (input: T & { startDate: string; endDate: string }) => Promise<R>,
+    options?: { previousCacheKey?: string }
   ): Promise<{
     current: R;
     previous: R | null;
@@ -118,19 +120,32 @@ function getCurrentAndPrevious<
         current.startDate = current.endDate;
       }
     }
+    // The previous comparison window is a CLOSED period entirely in the past —
+    // the subscription clamp above only ever touches `current`, so these bounds
+    // are immutable for a given day. For non-realtime ranges, serve it from a
+    // long-lived cache keyed on the resolved previous bounds (so a rolling
+    // window invalidates when the boundary advances) instead of re-scanning
+    // events/sessions on every cold load.
+    const previousInput = {
+      ...input,
+      startDate: previous.startDate,
+      endDate: previous.endDate,
+    };
+    const previousPromise: Promise<R | null> = !fetchPrevious
+      ? Promise.resolve(null)
+      : options?.previousCacheKey && !REALTIME_RANGES.has(input.range)
+        ? getCachedPreviousPeriod(options.previousCacheKey, previousInput, () =>
+            fn(previousInput)
+          )
+        : fn(previousInput);
+
     const res = await Promise.all([
       fn({
         ...input,
         startDate: current.startDate,
         endDate: current.endDate,
       }),
-      fetchPrevious
-        ? fn({
-            ...input,
-            startDate: previous.startDate,
-            endDate: previous.endDate,
-          })
-        : Promise.resolve(null),
+      previousPromise,
     ]);
 
     return {
@@ -286,17 +301,23 @@ export const overviewRouter = createTRPCRouter({
           { ...input, timezone },
           true,
           timezone,
-        )(overviewService.getMetrics.bind(overviewService)),
+        )(overviewService.getMetrics.bind(overviewService), {
+          previousCacheKey: 'metrics',
+        }),
         getCurrentAndPrevious(
           { ...input, timezone },
           true,
           timezone,
-        )(overviewService.getEventMetrics.bind(overviewService)),
+        )(overviewService.getEventMetrics.bind(overviewService), {
+          previousCacheKey: 'eventMetrics',
+        }),
         getCurrentAndPrevious(
           { ...input, timezone },
           true,
           timezone,
-        )(overviewService.getMultiGameSessions.bind(overviewService)),
+        )(overviewService.getMultiGameSessions.bind(overviewService), {
+          previousCacheKey: 'multiGameSessions',
+        }),
       ]);
       return {
         metrics: {
