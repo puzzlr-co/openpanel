@@ -3,6 +3,7 @@ import { z } from 'zod';
 import {
   chartSegments,
   chartTypes,
+  filterValueTypes,
   intervals,
   lineTypes,
   metrics,
@@ -28,6 +29,13 @@ export const zChartEventFilter = z.object({
   value: z
     .array(z.string().or(z.number()).or(z.boolean()).or(z.null()))
     .describe('The values to filter on'),
+  type: z
+    .enum(objectToZodEnums(filterValueTypes))
+    .optional()
+    .describe(
+      'Cast type for the column/value in equality & comparison operators ' +
+        '(string/number/date/datetime/boolean). Absent = legacy behavior.',
+    ),
   cohortId: z
     .string()
     .optional()
@@ -223,6 +231,12 @@ export const zReportInput = z.object({
   breakdowns: zChartBreakdowns
     .default([])
     .describe('Array of dimensions to break down the data by'),
+  globalFilters: z
+    .array(zChartEventFilter)
+    .optional()
+    .describe(
+      'Filters applied to ALL event series in this report (combined with each series own filters using AND)',
+    ),
   range: zRange
     .default('30d')
     .describe('The time range for which data should be displayed'),
@@ -545,6 +559,7 @@ export const zPassword = z.string().min(8);
 export const zSignInEmail = z.object({
   email: z.string().email().min(1),
   password: zPassword,
+  inviteId: z.string().nullish(),
 });
 export type ISignInEmail = z.infer<typeof zSignInEmail>;
 
@@ -658,6 +673,21 @@ export type IUmamiImportConfig = z.infer<typeof zUmamiImportConfig>;
 export const zPlausibleImportConfig = createFileImportConfig('plausible');
 export type IPlausibleImportConfig = z.infer<typeof zPlausibleImportConfig>;
 
+export const zAmplitudeDataResidency = z.enum(['us', 'eu']);
+export type IAmplitudeDataResidency = z.infer<typeof zAmplitudeDataResidency>;
+
+export const zAmplitudeImportConfig = z.object({
+  provider: z.literal('amplitude'),
+  type: z.literal('api'),
+  apiKey: z.string().min(1),
+  secretKey: z.string().min(1),
+  from: z.string().min(1),
+  to: z.string().min(1),
+  mapScreenViewProperty: z.string().optional(),
+  dataResidency: zAmplitudeDataResidency.optional(),
+});
+export type IAmplitudeImportConfig = z.infer<typeof zAmplitudeImportConfig>;
+
 export const zMixpanelDataResidency = z.enum(['us', 'eu', 'in']);
 export type IMixpanelDataResidency = z.infer<typeof zMixpanelDataResidency>;
 
@@ -677,15 +707,17 @@ export type IMixpanelImportConfig = z.infer<typeof zMixpanelImportConfig>;
 export type IImportConfig =
   | IUmamiImportConfig
   | IPlausibleImportConfig
-  | IMixpanelImportConfig;
+  | IMixpanelImportConfig
+  | IAmplitudeImportConfig;
 
 export const zCreateImport = z.object({
   projectId: z.string().min(1),
-  provider: z.enum(['umami', 'plausible', 'mixpanel']),
+  provider: z.enum(['umami', 'plausible', 'mixpanel', 'amplitude']),
   config: z.union([
     zUmamiImportConfig,
     zPlausibleImportConfig,
     zMixpanelImportConfig,
+    zAmplitudeImportConfig,
   ]),
 });
 

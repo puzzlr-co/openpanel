@@ -1,4 +1,4 @@
-export type ImportProviderId = 'umami' | 'mixpanel';
+export type ImportProviderId = 'umami' | 'mixpanel' | 'amplitude';
 export type ImportProviderType = 'file' | 'api';
 
 export interface ImportProviderMeta {
@@ -24,6 +24,14 @@ export const IMPORT_PROVIDERS: ImportProviderMeta[] = [
     name: 'Mixpanel',
     description: 'Import your analytics data from Mixpanel API',
     logo: 'https://cdn.brandfetch.io/idr_rhI2FS/theme/dark/idMJ8uODLv.svg?c=1dxbfHSJFAPEGdCLU4o5B',
+    backgroundColor: '#fff',
+    types: ['api'],
+  },
+  {
+    id: 'amplitude',
+    name: 'Amplitude',
+    description: 'Import your analytics data from the Amplitude Export API',
+    logo: 'https://cdn.brandfetch.io/idnYrZGER0/theme/dark/symbol.svg?c=1dxbfHSJFAPEGdCLU4o5B',
     backgroundColor: '#fff',
     types: ['api'],
   },

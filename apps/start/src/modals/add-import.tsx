@@ -9,11 +9,13 @@ import { useTRPC } from '@/integrations/trpc/react';
 import { cn } from '@/lib/utils';
 import { zodResolver } from '@hookform/resolvers/zod';
 import type {
+  IAmplitudeImportConfig,
   IImportConfig,
   IMixpanelImportConfig,
   IUmamiImportConfig,
 } from '@openpanel/validation';
 import {
+  zAmplitudeImportConfig,
   zMixpanelImportConfig,
   zUmamiImportConfig,
 } from '@openpanel/validation';
@@ -31,7 +33,7 @@ import type { z } from 'zod';
 import { popModal, pushModal } from '.';
 import { ModalContent, ModalHeader } from './Modal/Container';
 
-type Provider = 'umami' | 'plausible' | 'mixpanel';
+type Provider = 'umami' | 'plausible' | 'mixpanel' | 'amplitude';
 
 interface AddImportProps {
   provider: Provider;
@@ -41,6 +43,7 @@ interface AddImportProps {
 
 type UmamiFormData = z.infer<typeof zUmamiImportConfig>;
 type MixpanelFormData = z.infer<typeof zMixpanelImportConfig>;
+type AmplitudeFormData = z.infer<typeof zAmplitudeImportConfig>;
 
 interface UmamiImportProps {
   onSubmit: (config: IUmamiImportConfig) => void;
@@ -253,6 +256,136 @@ function MixpanelImport({
   );
 }
 
+interface AmplitudeImportProps {
+  onSubmit: (config: IAmplitudeImportConfig) => void;
+  isPending: boolean;
+  organizationId: string;
+}
+
+function AmplitudeImport({ onSubmit, isPending }: AmplitudeImportProps) {
+  const form = useForm<AmplitudeFormData>({
+    resolver: zodResolver(zAmplitudeImportConfig),
+    defaultValues: {
+      provider: 'amplitude',
+      type: 'api',
+      apiKey: '',
+      secretKey: '',
+      from: '',
+      to: '',
+    },
+  });
+
+  const handleDateRangeSelect = () => {
+    pushModal('DateRangerPicker', {
+      startDate: form.getValues('from')
+        ? new Date(form.getValues('from'))
+        : undefined,
+      endDate: form.getValues('to')
+        ? new Date(form.getValues('to'))
+        : undefined,
+      onChange: ({ startDate, endDate }) => {
+        form.setValue('from', format(startDate, 'yyyy-MM-dd'));
+        form.setValue('to', format(endDate, 'yyyy-MM-dd'));
+        form.trigger('from');
+        form.trigger('to');
+      },
+    });
+  };
+
+  const handleSubmit = form.handleSubmit((data) => {
+    onSubmit(data);
+  });
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <div className="space-y-4 py-4">
+        <InputWithLabel
+          label="API Key"
+          placeholder="Your Amplitude API key"
+          error={form.formState.errors.apiKey?.message}
+          info="Settings → Projects → General in Amplitude."
+          {...form.register('apiKey')}
+        />
+
+        <InputWithLabel
+          label="Secret Key"
+          type="password"
+          placeholder="Your Amplitude secret key"
+          error={form.formState.errors.secretKey?.message}
+          {...form.register('secretKey')}
+        />
+
+        <WithLabel
+          label="Date Range"
+          info={
+            !form.getValues('from') || !form.getValues('to')
+              ? 'Select the date range for importing data'
+              : undefined
+          }
+        >
+          <Button
+            type="button"
+            variant="outline"
+            className={cn(
+              'w-full justify-start text-left font-normal',
+              (!form.getValues('from') || !form.getValues('to')) &&
+                'text-muted-foreground',
+            )}
+            onClick={handleDateRangeSelect}
+          >
+            <CalendarIcon className="mr-2 h-4 w-4" />
+            {form.getValues('from') && form.getValues('to') ? (
+              <>
+                {format(new Date(form.getValues('from')), 'LLL dd, y')} -{' '}
+                {format(new Date(form.getValues('to')), 'LLL dd, y')}
+              </>
+            ) : (
+              <span>Pick a date range</span>
+            )}
+          </Button>
+        </WithLabel>
+
+        <InputWithLabel
+          label="Screen View Property"
+          placeholder="Enter the name of the property that contains the screen name"
+          info="Leave empty if not applicable"
+          error={form.formState.errors.mapScreenViewProperty?.message}
+          {...form.register('mapScreenViewProperty')}
+        />
+
+        <WithLabel
+          label="Data Residency"
+          info="Select the Amplitude data region your project uses"
+        >
+          <Select
+            value={form.watch('dataResidency') ?? 'us'}
+            onValueChange={(value) =>
+              form.setValue('dataResidency', value as 'us' | 'eu')
+            }
+          >
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder="US (default)" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="us">US (default)</SelectItem>
+              <SelectItem value="eu">EU</SelectItem>
+            </SelectContent>
+          </Select>
+        </WithLabel>
+      </div>
+
+      <div className="flex justify-between">
+        <Button type="button" variant="outline" onClick={() => popModal()}>
+          Cancel
+        </Button>
+        <Button type="submit" disabled={isPending}>
+          {isPending ? 'Starting...' : 'Start Import'}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
 export default function AddImport({ provider, name }: AddImportProps) {
   const { projectId, organizationId } = useAppParams();
   const trpc = useTRPC();
@@ -297,6 +430,14 @@ export default function AddImport({ provider, name }: AddImportProps) {
 
       {provider === 'mixpanel' && (
         <MixpanelImport
+          onSubmit={handleImportSubmit}
+          isPending={createImport.isPending}
+          organizationId={organizationId}
+        />
+      )}
+
+      {provider === 'amplitude' && (
+        <AmplitudeImport
           onSubmit={handleImportSubmit}
           isPending={createImport.isPending}
           organizationId={organizationId}

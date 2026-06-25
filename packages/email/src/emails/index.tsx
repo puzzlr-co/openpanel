@@ -19,7 +19,7 @@ import OnboardingWelcome, { zOnboardingWelcome } from './onboarding-welcome';
 import OnboardingWhatToTrack, {
   zOnboardingWhatToTrack,
 } from './onboarding-what-to-track';
-import TrailEndingSoon, { zTrailEndingSoon } from './trial-ending-soon';
+import WeeklyDigest, { zWeeklyDigest } from './weekly-digest';
 
 export const templates = {
   invite: {
@@ -34,45 +34,51 @@ export const templates = {
     Component: EmailResetPassword,
     schema: zEmailResetPassword,
   },
-  'trial-ending-soon': {
-    subject: (data: z.infer<typeof zTrailEndingSoon>) =>
-      'Your trial is ending soon',
-    Component: TrailEndingSoon,
-    schema: zTrailEndingSoon,
-  },
   'onboarding-welcome': {
-    subject: () => "You're in",
+    subject: () => 'Welcome to OpenPanel',
     Component: OnboardingWelcome,
     schema: zOnboardingWelcome,
     category: 'onboarding' as const,
   },
   'onboarding-what-to-track': {
-    subject: () => "What's actually worth tracking",
+    subject: (data: z.infer<typeof zOnboardingWhatToTrack>) =>
+      data.hasData ? 'What to track first' : 'Stuck on the install?',
     Component: OnboardingWhatToTrack,
     schema: zOnboardingWhatToTrack,
     category: 'onboarding' as const,
   },
   'onboarding-dashboards': {
-    subject: () => 'The part most people skip',
+    subject: (data: z.infer<typeof zOnboardingDashboards>) =>
+      data.hasData ? 'Your first dashboard' : 'A week in, no data yet',
     Component: OnboardingDashboards,
     schema: zOnboardingDashboards,
     category: 'onboarding' as const,
   },
   'onboarding-feature-request': {
-    subject: () => 'One provider to rule them all',
+    subject: () => 'Anything missing?',
     Component: OnboardingFeatureRequest,
     schema: zOnboardingFeatureRequest,
     category: 'onboarding' as const,
   },
   'onboarding-trial-ending': {
-    subject: () => 'Your trial ends in a few days',
+    subject: (data: z.infer<typeof zOnboardingTrialEnding>) =>
+      data.trialEndDate
+        ? `Your OpenPanel trial ends ${data.trialEndDate}`
+        : 'Your OpenPanel trial ends soon',
     Component: OnboardingTrialEnding,
     schema: zOnboardingTrialEnding,
   },
   'onboarding-trial-ended': {
-    subject: () => 'Your trial has ended',
+    subject: () => 'Your trial ended, dashboard is locked',
     Component: OnboardingTrialEnded,
     schema: zOnboardingTrialEnded,
+  },
+  'weekly-digest': {
+    subject: (data: z.infer<typeof zWeeklyDigest>) =>
+      `Your week on ${data.projectName}`,
+    Component: WeeklyDigest,
+    schema: zWeeklyDigest,
+    category: 'weekly_digest' as const,
   },
 } as const;
 
