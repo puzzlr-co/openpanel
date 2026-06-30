@@ -39,10 +39,11 @@ const PREV_LINE_COLOR = 'oklch(from var(--foreground) l c h / 0.4)';
 
 const TITLES = [
   {
-    title: 'Unique Visitors',
+    title: 'Total DAU',
     key: 'unique_visitors',
     unit: '',
     inverted: false,
+    info: 'Sum of daily active users over the selected period — a "visitor-day" count, not a deduplicated headcount. Because traffic is fully anonymous, a visitor\'s fingerprint resets every 24h, so someone who comes back on 3 days is counted 3 times. Pair it with Avg DAU (the typical single-day count) and the Returning visitors / retention widgets to gauge repeat behaviour.',
   },
   {
     title: 'Avg DAU',
