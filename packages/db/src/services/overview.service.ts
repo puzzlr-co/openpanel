@@ -1775,11 +1775,11 @@ export class OverviewService {
     timezone: string;
   }): Promise<Array<{ game: string; started: number; completed: number }>> {
     const where = this.getRawWhereClause('events', filters);
-    // Prefer game_tag; fall back to game_id when the event carries no tag.
-    // game_id is a materialized column (migration 18); game_tag is read from the
-    // properties Map, which yields '' for a missing key.
-    const gameKey =
-      "if(properties['game_tag'] != '', properties['game_tag'], game_id)";
+    // Prefer game_tag; fall back to game_id when the event carries no tag. Both
+    // are materialized columns (game_id: migration 18, game_tag: migration 19),
+    // so this is a native read with no properties-Map decompress.
+    // LowCardinality(String) yields '' for a missing key.
+    const gameKey = "if(game_tag != '', game_tag, game_id)";
 
     const query = clix(this.client, timezone)
       .select<{ game: string; started: number; completed: number }>([
