@@ -2,8 +2,9 @@
  * Top games (fork-only) — lists games by levels started, with levels completed
  * and the play-through rate (completed / started). Built to match the Top events
  * widget: searchable head, the shared overview table, plain numbers, no extra
- * styling. game_id is the grouping key (present on ~100% of level events);
- * aliases like quiz/quizr stay as separate rows on purpose (merging is a
+ * styling. Grouped by game_tag, falling back to game_id when an event has no
+ * tag (game_id is present on ~100% of level events); aliases like quiz/quizr
+ * stay as separate rows on purpose (merging is a
  * manual data decision, not a display concern). Low rates can be real: quiz
  * fires level_completed only on a perfect run (fail-state game), so its ~6%
  * is honest and not comparable to puzzle games.
@@ -66,7 +67,7 @@ export default function OverviewTopGames({
   const maxStarted = Math.max(1, ...data.map((g) => g.started));
   const q = search.trim().toLowerCase();
   const filtered = q
-    ? data.filter((g) => g.game_id.toLowerCase().includes(q))
+    ? data.filter((g) => g.game.toLowerCase().includes(q))
     : data;
 
   return (
@@ -86,19 +87,19 @@ export default function OverviewTopGames({
         ) : (
           <OverviewWidgetTable
             data={filtered}
-            keyExtractor={(g) => g.game_id}
+            keyExtractor={(g) => g.game}
             getColumnPercentage={(g) => g.started / maxStarted}
             columns={[
               {
                 name: 'Game',
                 width: 'w-full',
                 responsive: { priority: 1 },
-                getSortValue: (g: GameRow) => g.game_id,
+                getSortValue: (g: GameRow) => g.game,
                 render(g: GameRow) {
                   return (
                     <div className="row min-w-0 items-center gap-2">
-                      <SerieIcon name={g.game_id} />
-                      <span className="truncate">{g.game_id}</span>
+                      <SerieIcon name={g.game} />
+                      <span className="truncate">{g.game}</span>
                     </div>
                   );
                 },

@@ -1756,9 +1756,11 @@ export class OverviewService {
   }
 
   // Fork-only: per-game level funnel (started / completed) for the Top games
-  // widget. game_id lives on ~100% of level_started/level_completed events, so a
-  // single grouped scan with countIf gives both numbers. Aliases (quiz/quizr,
-  // etc.) are intentionally left as separate rows.
+  // widget. Grouped by game_tag (the human-facing label), falling back to
+  // game_id when an event carries no tag — game_id lives on ~100% of
+  // level_started/level_completed events, so a single grouped scan with countIf
+  // gives both numbers. Aliases (quiz/quizr, etc.) are intentionally left as
+  // separate rows.
   async getTopGames({
     projectId,
     filters,
@@ -1771,13 +1773,17 @@ export class OverviewService {
     startDate: string;
     endDate: string;
     timezone: string;
-  }): Promise<Array<{ game_id: string; started: number; completed: number }>> {
+  }): Promise<Array<{ game: string; started: number; completed: number }>> {
     const where = this.getRawWhereClause('events', filters);
-    const gameKey = 'game_id';
+    // Prefer game_tag; fall back to game_id when the event carries no tag.
+    // game_id is a materialized column (migration 18); game_tag is read from the
+    // properties Map, which yields '' for a missing key.
+    const gameKey =
+      "if(properties['game_tag'] != '', properties['game_tag'], game_id)";
 
     const query = clix(this.client, timezone)
-      .select<{ game_id: string; started: number; completed: number }>([
-        `${gameKey} as game_id`,
+      .select<{ game: string; started: number; completed: number }>([
+        `${gameKey} as game`,
         "countIf(name = 'level_started') as started",
         "countIf(name = 'level_completed') as completed",
       ])
@@ -1789,8 +1795,8 @@ export class OverviewService {
         clix.datetime(endDate, 'toDateTime'),
       ])
       .rawWhere(where)
-      .rawWhere(`${gameKey} IS NOT NULL AND ${gameKey} != ''`)
-      .groupBy(['game_id'])
+      .rawWhere(`${gameKey} != ''`)
+      .groupBy(['game'])
       .orderBy('started', 'DESC')
       .limit(MAX_RECORDS_LIMIT);
 
