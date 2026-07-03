@@ -67,7 +67,7 @@ export default function OverviewTopGames({
   const maxStarted = Math.max(1, ...data.map((g) => g.started));
   const q = search.trim().toLowerCase();
   const filtered = q
-    ? data.filter((g) => g.game.toLowerCase().includes(q))
+    ? data.filter((g) => g.game_id.toLowerCase().includes(q))
     : data;
 
   return (
@@ -87,19 +87,19 @@ export default function OverviewTopGames({
         ) : (
           <OverviewWidgetTable
             data={filtered}
-            keyExtractor={(g) => g.game}
+            keyExtractor={(g) => g.game_id}
             getColumnPercentage={(g) => g.started / maxStarted}
             columns={[
               {
                 name: 'Game',
                 width: 'w-full',
                 responsive: { priority: 1 },
-                getSortValue: (g: GameRow) => g.game,
+                getSortValue: (g: GameRow) => g.game_id,
                 render(g: GameRow) {
                   return (
                     <div className="row min-w-0 items-center gap-2">
-                      <SerieIcon name={g.game} />
-                      <span className="truncate">{g.game}</span>
+                      <SerieIcon name={g.game_id} />
+                      <span className="truncate">{g.game_id}</span>
                     </div>
                   );
                 },

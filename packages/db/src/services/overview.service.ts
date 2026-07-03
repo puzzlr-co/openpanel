@@ -61,8 +61,11 @@ const WHITELISTED_FILTERS = [
   'utm_term',
   'utm_content',
   // fork: allow overview widgets to be filtered by game. Property filters are
-  // otherwise dropped here; this routes properties.game_id through
-  // getEventFiltersWhereClause's properties.* path -> properties['game_id'].
+  // otherwise dropped here; these route through getEventFiltersWhereClause's
+  // properties.* path -> properties['game_tag'] / properties['game_id']. The
+  // game picker scopes by game_tag (the per-instance slug the Top Games list is
+  // keyed by); game_id is retained for canonical-level filtering.
+  'properties.game_tag',
   'properties.game_id',
 ];
 
@@ -1756,11 +1759,10 @@ export class OverviewService {
   }
 
   // Fork-only: per-game level funnel (started / completed) for the Top games
-  // widget. Grouped by game_tag (the human-facing label), falling back to
-  // game_id when an event carries no tag — game_id lives on ~100% of
-  // level_started/level_completed events, so a single grouped scan with countIf
-  // gives both numbers. Aliases (quiz/quizr, etc.) are intentionally left as
-  // separate rows.
+  // widget, one row per game. The output column `game_id` is the *resolved* game
+  // key (see gameKey below), not the raw game_id — game_tag (per-instance slug)
+  // when present, else the game_id column for pre-tag events. Aliases (quiz/quizr,
+  // etc.) are intentionally left as separate rows.
   async getTopGames({
     projectId,
     filters,
@@ -1773,7 +1775,7 @@ export class OverviewService {
     startDate: string;
     endDate: string;
     timezone: string;
-  }): Promise<Array<{ game: string; started: number; completed: number }>> {
+  }): Promise<Array<{ game_id: string; started: number; completed: number }>> {
     const where = this.getRawWhereClause('events', filters);
     // Prefer game_tag; fall back to game_id when the event carries no tag. Both
     // are materialized columns (game_id: migration 18, game_tag: migration 19),
@@ -1782,8 +1784,8 @@ export class OverviewService {
     const gameKey = "if(game_tag != '', game_tag, game_id)";
 
     const query = clix(this.client, timezone)
-      .select<{ game: string; started: number; completed: number }>([
-        `${gameKey} as game`,
+      .select<{ game_id: string; started: number; completed: number }>([
+        `${gameKey} as game_id`,
         "countIf(name = 'level_started') as started",
         "countIf(name = 'level_completed') as completed",
       ])
@@ -1796,7 +1798,7 @@ export class OverviewService {
       ])
       .rawWhere(where)
       .rawWhere(`${gameKey} != ''`)
-      .groupBy(['game'])
+      .groupBy(['game_id'])
       .orderBy('started', 'DESC')
       .limit(MAX_RECORDS_LIMIT);
 

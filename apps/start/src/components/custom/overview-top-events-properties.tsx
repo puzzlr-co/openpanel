@@ -16,8 +16,8 @@
  * The header also carries a compact "All games" Combobox (right of the
  * Events/Conversions tabs) that filters this card — and its drill-down — by a
  * single game. The game list comes from overview.topGames; the chosen game is
- * merged into the queries as a `properties.game_id` filter (widget-local React
- * state, not the global overview filter). Requires 'properties.game_id' on
+ * merged into the queries as a `properties.game_tag` filter (widget-local React
+ * state, not the global overview filter). Requires 'properties.game_tag' on
  * WHITELISTED_FILTERS in overview.service.ts, otherwise the filter is dropped.
  *
  * Drill-down was chosen (2026-06-03) over inline-expand and popover-peek
@@ -68,7 +68,11 @@ type DrillView =
   | { level: 'values'; event: EventTableItem; propertyKey: string };
 
 // Property filter that scopes this card (and its drill-down) to one game.
-const GAME_FILTER = 'properties.game_id';
+// Scope by game_tag — the per-instance slug the Top Games list is keyed by, so
+// the picked row (whose value is that slug) matches exactly. game_id (canonical)
+// would merge sibling slugs (e.g. quiz + sports-quiz) into one bucket, and for
+// slug≠canonical games would match nothing at all.
+const GAME_FILTER = 'properties.game_tag';
 
 export default function OverviewTopEventsProperties({
   projectId,
