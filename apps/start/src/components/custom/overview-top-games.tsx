@@ -2,10 +2,11 @@
  * Top games (fork-only) — lists games by levels started, with levels completed
  * and the play-through rate (completed / started). Built to match the Top events
  * widget: searchable head, the shared overview table, plain numbers, no extra
- * styling. Grouped by game_tag, falling back to game_id when an event has no
- * tag (game_id is present on ~100% of level events); aliases like quiz/quizr
- * stay as separate rows on purpose (merging is a
- * manual data decision, not a display concern). Low rates can be real: quiz
+ * styling. Grouped by the resolved game key (game_tag, falling back to game_id
+ * for pre-tag events) — centralized as GAME_KEY_EXPR in overview.service.ts and
+ * shared with the multi-game metric and the per-game drill-down filter. Aliases
+ * like quiz/quizr stay as separate rows on purpose (merging is a manual data
+ * decision, not a display concern). Low rates can be real: quiz
  * fires level_completed only on a perfect run (fail-state game), so its ~6%
  * is honest and not comparable to puzzle games.
  *

@@ -60,14 +60,28 @@ const WHITELISTED_FILTERS = [
   'utm_campaign',
   'utm_term',
   'utm_content',
-  // fork: allow overview widgets to be filtered by game. Property filters are
-  // otherwise dropped here; these route through getEventFiltersWhereClause's
-  // properties.* path -> properties['game_tag'] / properties['game_id']. The
-  // game picker scopes by game_tag (the per-instance slug the Top Games list is
-  // keyed by); game_id is retained for canonical-level filtering.
+  // fork: allow overview widgets to be filtered on a raw game property. These
+  // route through getEventFiltersWhereClause's properties.* path ->
+  // properties['game_tag'] / properties['game_id'] and support manual property
+  // filtering. The per-game picker no longer uses these — it scopes by the
+  // resolved GAME_KEY_FILTER below (handled in getRawWhereClause before this
+  // whitelist), so its bucket matches the Top Games row exactly.
   'properties.game_tag',
   'properties.game_id',
 ];
+
+// fork: the resolved game key — the per-instance slug (game_tag) when present,
+// else the canonical game_id for pre-tag events. Reads two materialized
+// LowCardinality columns (game_id: migration 18, game_tag: migration 19), so no
+// properties-Map decompress. Single source of truth for the Top Games grouping,
+// the multi-game distinct-count, and the per-game drill-down filter, so all
+// three key off the exact same identity across the game_tag cutover and for both
+// canonical-slug and whitelabel games.
+const GAME_KEY_EXPR = "if(game_tag != '', game_tag, game_id)";
+// Synthetic overview-filter name that scopes a widget to one resolved game key.
+// Handled directly in getRawWhereClause (it's an expression over two columns,
+// not a single whitelisted column), so it never reaches the whitelist above.
+const GAME_KEY_FILTER = 'game_key';
 
 // Columns that exist on the sessions table but not on events — on events
 // they're stored inside the properties map under __query.utm_*.
@@ -574,7 +588,10 @@ export class OverviewService {
 
   // Multi-game sessions: % of sessions (with at least one level_started in the
   // window) that played 2+ distinct games. Puzzlr-specific — relies on the
-  // `level_started` event and `game_id` property emitted by Puzzlr SDKs.
+  // `level_started` event emitted by Puzzlr SDKs. Distinct games are counted on
+  // the resolved GAME_KEY_EXPR (per-instance slug when present, else canonical
+  // game_id), so this counts distinct *playable instances* — matching the Top
+  // Games list — rather than merged canonical kinds.
   // Headline is a period-wide ratio; series is a per-bucket ratio mirroring
   // the headline at the user's selected interval.
   async getMultiGameSessions({
@@ -596,12 +613,12 @@ export class OverviewService {
     // of the same level_started events. A session straddling a bucket boundary
     // is counted in each bucket it touches (~0.2% of sessions), so the rollup
     // headline can differ from a strict per-session figure by ~0.1pp — an
-    // accepted trade-off for halving this metric's (game_id-Map) scan cost.
+    // accepted trade-off for halving this metric's scan cost.
     const bucketedCte = clix(this.client, timezone)
       .select<{ bucket: string; session_id: string; games: number }>([
         `${clix.toStartOf('created_at', interval as any, timezone)} AS bucket`,
         'session_id',
-        'uniqExact(game_id) AS games',
+        `uniqExact(${GAME_KEY_EXPR}) AS games`,
       ])
       .from(TABLE_NAMES.events)
       .where('project_id', '=', projectId)
@@ -986,8 +1003,30 @@ export class OverviewService {
   }
 
   getRawWhereClause(type: 'events' | 'sessions', filters: IChartEventFilter[]) {
+    // fork: the per-game picker sends a synthetic `game_key` filter. Scope it by
+    // the resolved GAME_KEY_EXPR — the same expression Top Games groups by — so
+    // the drill-down matches the picked row across the game_tag cutover and for
+    // every game class. It's an expression over two columns (not a single
+    // whitelisted column), so emit it as a raw condition here rather than through
+    // the whitelist pre-pass. Only the events table carries the game columns.
+    const gameKeyConds =
+      type === 'events'
+        ? filters
+            .filter((item) => item.name === GAME_KEY_FILTER)
+            .flatMap((item) => {
+              const vals = (item.value ?? []).map((v) =>
+                sqlstring.escape(String(v)),
+              );
+              if (vals.length === 0) return [];
+              return vals.length === 1
+                ? `${GAME_KEY_EXPR} = ${vals[0]}`
+                : `${GAME_KEY_EXPR} IN (${vals.join(', ')})`;
+            })
+        : [];
+    const rest = filters.filter((item) => item.name !== GAME_KEY_FILTER);
+
     const where = getEventFiltersWhereClause(
-      filters.flatMap((item) => {
+      rest.flatMap((item) => {
         if (!WHITELISTED_FILTERS.includes(item.name)) {
           return []
         }
@@ -1027,7 +1066,7 @@ export class OverviewService {
       type,
     );
 
-    return Object.values(where).join(' AND ');
+    return [...Object.values(where), ...gameKeyConds].join(' AND ');
   }
 
   async getTopPages({
@@ -1777,15 +1816,12 @@ export class OverviewService {
     timezone: string;
   }): Promise<Array<{ game_id: string; started: number; completed: number }>> {
     const where = this.getRawWhereClause('events', filters);
-    // Prefer game_tag; fall back to game_id when the event carries no tag. Both
-    // are materialized columns (game_id: migration 18, game_tag: migration 19),
-    // so this is a native read with no properties-Map decompress.
-    // LowCardinality(String) yields '' for a missing key.
-    const gameKey = "if(game_tag != '', game_tag, game_id)";
 
     const query = clix(this.client, timezone)
       .select<{ game_id: string; started: number; completed: number }>([
-        `${gameKey} as game_id`,
+        // Resolved game key (GAME_KEY_EXPR): game_tag when present, else game_id
+        // — both materialized LowCardinality cols, so no properties-Map decompress.
+        `${GAME_KEY_EXPR} as game_id`,
         "countIf(name = 'level_started') as started",
         "countIf(name = 'level_completed') as completed",
       ])
@@ -1797,7 +1833,7 @@ export class OverviewService {
         clix.datetime(endDate, 'toDateTime'),
       ])
       .rawWhere(where)
-      .rawWhere(`${gameKey} != ''`)
+      .rawWhere(`${GAME_KEY_EXPR} != ''`)
       .groupBy(['game_id'])
       .orderBy('started', 'DESC')
       .limit(MAX_RECORDS_LIMIT);

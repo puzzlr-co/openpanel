@@ -464,3 +464,49 @@ describe('overview.service / getRawWhereClause (UTM remapping)', () => {
     );
   });
 });
+
+describe('overview.service / getRawWhereClause (game_key resolved filter)', () => {
+  const svc = new OverviewService(ch);
+  // The per-game picker sends a synthetic `game_key` filter. It must scope by the
+  // resolved key (game_tag when present, else game_id) — the same expression Top
+  // Games groups by — so the drill-down matches the picked row across the
+  // game_tag cutover, instead of the raw properties['game_tag'] path (which
+  // misses pre-tag events of canonical-slug games like boxr/crossword).
+  it('emits the resolved if(game_tag,game_id) expression, not a raw property', () => {
+    const where = svc.getRawWhereClause('events', [
+      { name: 'game_key', operator: 'is', value: ['boxr'] },
+    ]);
+    expect(where).toBe("if(game_tag != '', game_tag, game_id) = 'boxr'");
+    expect(where).not.toContain("properties['game_tag']");
+    expect(where).not.toContain("properties['game_key']");
+  });
+
+  it('uses IN for multiple values', () => {
+    const where = svc.getRawWhereClause('events', [
+      { name: 'game_key', operator: 'is', value: ['boxr', 'sports-trace'] },
+    ]);
+    expect(where).toBe(
+      "if(game_tag != '', game_tag, game_id) IN ('boxr', 'sports-trace')",
+    );
+  });
+
+  it('drops the game_key filter for the sessions table (no game columns there)', () => {
+    const where = svc.getRawWhereClause('sessions', [
+      { name: 'game_key', operator: 'is', value: ['boxr'] },
+    ]);
+    expect(where).toBe('');
+  });
+
+  it('escapes the value (no SQL injection via the picked game)', () => {
+    const where = svc.getRawWhereClause('events', [
+      { name: 'game_key', operator: 'is', value: ["boxr' OR 1=1 --"] },
+    ]);
+    expect(where).not.toMatch(/OR 1=1 --\s*$/);
+    expect(where).toContain("if(game_tag != '', game_tag, game_id) = 'boxr\\' OR 1=1 --'");
+  });
+
+  // No itCH parse-check here: game_tag/game_id are fork MATERIALIZED columns
+  // (migrations 18/19) that the local dev CH schema doesn't carry, so a real-table
+  // EXPLAIN can't run locally. Parsing/execution was validated directly on prod
+  // (drill-down == Top Games row for boxr over a cutover-spanning window).
+});
