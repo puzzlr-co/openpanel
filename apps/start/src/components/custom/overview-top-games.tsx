@@ -32,12 +32,13 @@ import { useOverviewOptions } from '@/components/overview/useOverviewOptions';
 
 type GameRow = RouterOutputs['overview']['topGames'][number];
 
-// completed / started, capped at 100%. Some games have instrumentation seams
-// where level_completed outran level_started for a while (e.g. shiftr early
-// 2026), so within a window completed can exceed started — a >100% rate would
-// read as a bug. Same honesty cap the retention widget uses.
+// completed / started, both counted once per puzzle-per-session upstream (see
+// PUZZLE_OPEN_KEY in overview.service.ts). No cap: the >100% rates this used to
+// clamp came from dropping level-less starts out of the denominator, which the
+// dedup no longer does. If this ever exceeds 1 again, that is a real defect —
+// let it show rather than clamping it to a flattering 100%.
 const playThroughRate = (g: GameRow) =>
-  g.started > 0 ? Math.min(1, g.completed / g.started) : 0;
+  g.started > 0 ? g.completed / g.started : 0;
 
 export default function OverviewTopGames({
   projectId,

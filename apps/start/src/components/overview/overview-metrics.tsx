@@ -63,7 +63,7 @@ const TITLES = [
     key: 'level_completion',
     unit: '%',
     inverted: false,
-    info: 'Of levels started in the window, the percentage completed (level_completed / level_started across all games). Blended pulse — games with a fail state read differently per game.',
+    info: "Of puzzles opened in the window, the share finished — counted once per puzzle per session. Blended across all games and weighted by how much each is played, so a site's game mix moves this as much as its performance does. For a like-for-like read, use the per-game rates in Top Games.",
   },
   {
     title: 'Multi-game sessions',

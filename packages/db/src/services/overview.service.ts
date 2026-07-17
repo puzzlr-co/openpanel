@@ -78,6 +78,18 @@ const WHITELISTED_FILTERS = [
 // three key off the exact same identity across the game_tag cutover and for both
 // canonical-slug and whitelabel games.
 const GAME_KEY_EXPR = "if(game_tag != '', game_tag, game_id)";
+// The identity of one puzzle-open: a level, faced once, within one session.
+// Counting these rather than raw events is what makes the level-completion rate
+// comparable across games — a game that re-fires level_started on every retry
+// (knightr) would otherwise be divided by its own retries and read ~30pts low.
+// A level_started carrying no level_id (the client's pre-identity race) collapses
+// into the '' bucket and still counts as one unfinished open: dropping those rows
+// shrinks the denominator while completions — which carry level_id ~always — keep
+// theirs, which manufactures rates above 100%.
+//
+// Pair with GAME_KEY_EXPR wherever a query does not already group by game, or two
+// games sharing a level_id in one session collapse into a single open.
+const PUZZLE_OPEN_KEY = 'session_id, level_id';
 // Synthetic overview-filter name that scopes a widget to one resolved game key.
 // Handled directly in getRawWhereClause (it's an expression over two columns,
 // not a single whitelisted column), so it never reaches the whitelist above.
@@ -504,8 +516,12 @@ export class OverviewService {
     // multi-name scan produces identical values to the old per-metric queries.
     const returningRateExpr =
       "round(countIf(name = 'session_started' AND days_since_first_visit > 0) * 100.0 / nullIf(countIf(name = 'session_started'), 0), 1) AS returning_rate";
-    const levelCompletionExpr =
-      "round(countIf(name = 'level_completed') * 100.0 / nullIf(countIf(name = 'level_started'), 0), 1) AS level_completion";
+    // Of puzzles opened in the window, the share finished — counted once per
+    // PUZZLE_OPEN_KEY on both sides. Grouped by date only, so the game key is part
+    // of the identity here (see PUZZLE_OPEN_KEY). Deduping both sides is what lets
+    // this read knightr's pre-fix history, where level_started counted retries.
+    const puzzleOpenExpr = `(${GAME_KEY_EXPR}, ${PUZZLE_OPEN_KEY})`;
+    const levelCompletionExpr = `round(uniqExactIf(${puzzleOpenExpr}, name = 'level_completed') * 100.0 / nullIf(uniqExactIf(${puzzleOpenExpr}, name = 'level_started'), 0), 1) AS level_completion`;
 
     const combinedQuery = clix(this.client, timezone)
       .select<{
@@ -1822,8 +1838,10 @@ export class OverviewService {
         // Resolved game key (GAME_KEY_EXPR): game_tag when present, else game_id
         // — both materialized LowCardinality cols, so no properties-Map decompress.
         `${GAME_KEY_EXPR} as game_id`,
-        "countIf(name = 'level_started') as started",
-        "countIf(name = 'level_completed') as completed",
+        // Counted once per PUZZLE_OPEN_KEY, not per event. The resolved game key
+        // is already the GROUP BY below, so it is not repeated in the identity.
+        `uniqExactIf((${PUZZLE_OPEN_KEY}), name = 'level_started') as started`,
+        `uniqExactIf((${PUZZLE_OPEN_KEY}), name = 'level_completed') as completed`,
       ])
       .from(TABLE_NAMES.events, false)
       .where('project_id', '=', projectId)
